@@ -3,12 +3,15 @@
 What LCC's tool-call compaction does on real agent sessions, as opposed to the curated
 corpora behind [JEV.md](JEV.md) and the two sessions in
 [`benchmarks/research/REAL_SESSIONS.md`](../benchmarks/research/REAL_SESSIONS.md).
-Measured 2026-10-09 to 2026-10-11 against the code that became PR #45 (squash-merged as
-`74f10e1`).
+Measured 2026-10-09 to 2026-10-11. The `rules` arms ran on PR #45 branch commits (`413b6f4`,
+`8997be6`, `d0cb548`, `7b92ad2`, `1bc2005`, `653eeae`, `4c39161`; squash-merged as `74f10e1`).
+The mechanical, specialist and Jev rows in section 3 ran on `dd5dd80`, which predates #45
+(`real-context-bench-v0/PROTOCOL.md`, `real-context-bench-v0.1/RESULTS.md`).
 
 **Where the evidence lives.** Every number below comes from a committed receipt in
 `github.com/lucasmartins-ai/lcc-judge` (a **private** repository) under
-`research/goal-engine-2026-10-04/`. Those receipts hold counts only. Session text, ids and
+`research/goal-engine-2026-10-04/`. Readers outside the owner's account cannot open them, so
+treat every number here as owner-attested. Those receipts hold counts only. Session text, ids and
 per-item outputs stay on the owner's machine and are not published anywhere. The path
 next to each table is relative to that folder.
 
@@ -103,7 +106,7 @@ next request used. `lossy` stays experimental and is not recommended.
 ## 3. Against Jev, Laya and mechanical
 
 Source: `real-context-bench-v0/RESULTS.md`, `real-context-bench-v0.1/RESULTS.md`,
-`real-context-bench-v0.2/RESULTS.md` (same 60 Claude sessions, 49 with an applicable probe).
+`real-context-bench-v0.2/RESULTS.md` (same 60 real Claude contexts (items), 49 with an applicable probe).
 Lossless row: `lossless-dedup-v1/RESULTS.md`.
 
 | Arm | Item retention | Pooled token reduction | Median latency | Cost |
@@ -143,9 +146,10 @@ Sources: `genuine-requests-v1/README.md`, `request-taxonomy-v1/README.md`,
 ## 5. Opt-in request log
 
 `LCC_REQUEST_LOG=1` makes the CLI and MCP server append one line per request to
-`./.lcc/request-log/requests.jsonl` (`LCC_REQUEST_LOG_DIR` moves it). Each line holds only the
-redacted goal, a language guess, a salted session hash, the UTC date, the entry point, the
-LCC version and the redaction ruleset hash. Context is never logged. It is off by default.
+`./.lcc/request-log/requests.jsonl` (`LCC_REQUEST_LOG_DIR` moves it). Each line holds a random
+12-hex entry `id`, the redacted goal, a language guess, a salted session hash, the UTC date,
+the entry point, the redacted `field` value (or `"none"`), the LCC version and the redaction
+ruleset hash. Context is never logged. It is off by default.
 `lcc request-log` counts entries and `--delete ID` removes one. See
 [`src/lcc/request_log.py`](../src/lcc/request_log.py) and [PRIVACY_POLICY.md](PRIVACY_POLICY.md).
 

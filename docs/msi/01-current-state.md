@@ -1,7 +1,8 @@
 # MSI Sprint 0 — Current State (verified against code, 2026-10-02)
 
-> Snapshot as of 2026-10-02. Since then (2026-10-11): tool-call mode also accepts `laya` and the offline
-> `rules` provider (`lossless` default, `recoverable`, experimental `lossy`; PR #45), and block mode has a
+> Snapshot as of 2026-10-02. Since then (2026-10-11): tool-call mode gained the offline
+> `rules` provider (`lossless` default, `recoverable`, experimental `lossy`; PR #45), `provider=laya` no longer falls through to Jev
+> (PR #43, 2026-10-09), and block mode has a
 > `specialist` provider that runs shadow-only (ranks, never drops). Real-session results:
 > `docs/REAL_SESSION_BENCHMARKS.md`.
 

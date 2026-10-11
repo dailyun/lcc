@@ -26,7 +26,7 @@
     "provider": {
       "type": "string",
       "title": "Judge",
-      "description": "Which semantic judge decides which tool calls are spent. 'jev' is remote and needs TYPESAFE_API_KEY. 'laya' is local, offline and needs no key; tool-call payloads fit its window 97% of the time. See docs/LAYA.md section 2.",
+      "description": "Which semantic judge decides which tool calls are spent. 'jev' is remote and needs TYPESAFE_API_KEY. 'laya' is local, offline and needs no key; tool-call payloads fit its window 97% of the time. See docs/LAYA.md section 2. 'auto' prefers Jev. 'rules' is an offline deterministic policy with no model and no key (mode set by rulesMode; see docs/REAL_SESSION_BENCHMARKS.md).",
       "default": "jev"
     },
     "threshold": {

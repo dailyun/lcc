@@ -1,8 +1,9 @@
 # lcc — Claude Code plugin
 
 Replaces Claude Code's compaction summary with **verbatim** compaction: every tool call is
-paired with its result, TypeSafe Jev is asked whether the call and its output are still
-needed, and the pairs it says are spent are dropped. Nothing is summarized, nothing is
+paired with its result, a judge (TypeSafe Jev by default, local Laya, or the offline `rules`
+policy) decides whether the call and its output are still needed, and the pairs it marks
+spent are dropped or trimmed. Nothing is summarized, nothing is
 rewritten — kept messages carry their original bytes, and user/assistant text is never
 touched at all.
 
@@ -23,7 +24,8 @@ claude plugin install lcc@lcc
 ```
 
 Requirements: Claude Code **2.1.274 or newer** (function hooks), the `lcc` CLI on `PATH`
-(the plugin's `.mcp.json` starts `lcc mcp`), and a TypeSafe API key.
+(the plugin's `.mcp.json` starts `lcc mcp`), and a TypeSafe API key for `provider: jev` or
+`auto` (`laya` and `rules` need none).
 
 For local development against a checkout:
 
