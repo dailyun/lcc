@@ -322,6 +322,21 @@ def test_disk_check_refuses_symlinks_out_of_the_root_and_non_files(disk, tmp_pat
     assert d["c1"]["reason"] == "keep_disk_not_regular"
 
 
+def test_disk_check_keeps_dotdot_paths_that_a_symlink_would_redirect(disk, tmp_path_factory):
+    # ws/link -> other/sub: the kernel resolves link/../f.py to other/f.py, not ws/f.py.
+    other = tmp_path_factory.mktemp("other")
+    (other / "sub").mkdir()
+    (other / "f.py").write_text("CHANGED\n")
+    (disk / "f.py").write_text(FILE)
+    (disk / "link").symlink_to(other / "sub")
+    for path, cwd in ((str(disk / "link" / ".." / "f.py"), None), ("../f.py", str(disk / "link"))):
+        call = {"file_path": path} if cwd is None else {"file_path": path, "workdir": cwd}
+        _r, compacted, d = run(convo(("Read", call, NUMBERED), *filler()), workspace_root=str(disk))
+        assert d["c1"]["decision"] == "keep"
+        assert d["c1"]["reason"] == "keep_disk_dotdot"
+        assert text_of(compacted, "c1") == NUMBERED
+
+
 def test_file_changed_between_check_and_emit_is_kept(disk, monkeypatch):
     (disk / "p.py").write_text(FILE)
     decide = transcript_module.recoverable_decisions

@@ -14,7 +14,8 @@ tool result with a recovery pointer:
   (``recoverability_check`` ``transcript_proxy``).
 - Disk-authoritative (owner decision 2026-10-11): with a workspace root and ``disk_check`` on,
   the disk decides a file pointer instead of the transcript proxy. The file is replaced iff it
-  exists, resolves (symlinks followed) inside the workspace root or its own directory, is a
+  exists, its path has no ``..`` component, a final symlink does not escape its own directory
+  (files outside the workspace root are allowed: the root only switches the check on), is a
   regular file of at most :data:`DISK_MAX_BYTES`, decodes as UTF-8 and its bytes hold exactly
   the removed output (whole file, or the read's line range; ``Read`` line-number prefixes
   ``N\t``/``N→`` stripped, a Codex exec header dropped, no other normalisation). Later writes,
@@ -601,6 +602,10 @@ def recoverable_decisions(
                 reason = "command_pointers_disabled"
             elif target is None and (lines != "skip" or use_disk):
                 reason = "relative_path_without_cwd"  # with the disk on: no file to check
+            elif use_disk and ".." in posixpath.join(cwd or "", path).split("/"):
+                # normpath collapses '..' lexically, the kernel follows symlinks first: the
+                # checked file and the re-read file could differ, so never vouch for it.
+                reason = "keep_disk_dotdot"
             elif use_disk and (
                 state := _disk_check(call, target, spec, body, root)  # type: ignore[arg-type]
             )[0] != "ok":

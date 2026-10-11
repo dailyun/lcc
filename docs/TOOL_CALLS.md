@@ -128,8 +128,10 @@ The file-pointer check has two forms (`recoverability_check` in the report):
   Benched offline as v0.8 (LCC 4c39161): 0/0/0 verification on 847 items, pooled reduction
   0.0123; most removed pointers (1862 of 1978) are blocked by `file_written_later`.
 - `disk` (`workspace_root` set and `disk_check` on, the default): the disk decides instead.
-  A file read is replaced iff the file currently exists, resolves (symlinks followed) inside
-  the workspace root or its own directory, is a regular file of at most 4 MiB
+  A file read is replaced iff the file currently exists, its path has no `..` component, a
+  final symlink does not escape the file's own directory (files outside the workspace root
+  are allowed: `workspace_root` only switches the disk check on, it does not contain reads),
+  it is a regular file of at most 4 MiB
   (`DISK_MAX_BYTES`), decodes as UTF-8, and its bytes hold exactly the removed output — the
   whole file, or the read's line range. The only normalisation is the one the read tool
   applied: `Read`'s `N\t`/`N→` line-number prefixes and a Codex exec header are stripped;
