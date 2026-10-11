@@ -22,6 +22,8 @@ tool result with a recovery pointer:
   write at all; otherwise no write naming one of its paths.
 - Pointers name the call's working directory when it had one: ``(cwd <dir>)`` / ``in <dir>``.
 - Calls whose id is carried by more than one call or result are always kept.
+- Calls in a system temp dir (``/tmp``, ``/var/tmp``, ``/var/folders``, ``/dev/shm``: cwd, file
+  or command argument) are kept: the file may be gone when the agent re-reads it.
 
 Never replaced: anything off the allowlist (tests, builds, installs, network, MCP tools, web
 fetch/search, edit/patch results), failed results, the latest error-bearing result and the call
@@ -84,6 +86,8 @@ _CODEX_HEAD = re.compile(
     r"|Original token count)\b"
 )
 _EXIT = re.compile(r"^Process exited with code (\d+)")
+#: System temp dirs: their files can be cleared before the agent re-reads them.
+_TEMP = re.compile(r"^(?:/private)?/(?:tmp|var/tmp|var/folders)(?:/|$)|^/dev/shm(?:/|$)")
 
 
 def shell_command(call: Any) -> str | None:
@@ -288,6 +292,14 @@ def _cwd(call: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _temp(call: Any) -> bool:
+    """The call reads or runs in a system temp dir (its cwd, file or a command argument)."""
+    cmd = shell_command(call)
+    read = _file_read(call)
+    paths = [_cwd(call) or "", read[0] if read else ""] + ((_argv(cmd) or [])[1:] if cmd else [])
+    return any(_TEMP.match(p) for p in paths)
+
+
 def _file_pointer(path: str, lines: tuple[int, int] | None, cwd: str | None = None) -> str:
     span = f" (lines {lines[0]}-{lines[1]})" if lines else ""
     where = f" (cwd {cwd})" if cwd else ""
@@ -410,6 +422,8 @@ def recoverable_decisions(
             (read and _names_file(named_text, read[0])) or (cmd and _command_named(cmd, named_text))
         ):
             reason = "named_in_goal_or_recent_turns"
+        if reason is None and _temp(call):
+            reason = "temp_path"
         hit: dict[str, Any] | None = None
         cwd = _cwd(call)
         if reason is None and read is not None:
@@ -473,6 +487,8 @@ def _valid_pointers(call: Any, original: str) -> set[str]:
     """Every recovery pointer the planner could write for ``call`` and its original output:
     its own allowlisted command, or its own file with the exact line range and cwd."""
     pointers: set[str] = set()
+    if _temp(call):
+        return pointers
     cmd = shell_command(call)
     if cmd is not None and is_read_only_command(cmd):
         pointers.add(_command_pointer(cmd, _cwd(call)))

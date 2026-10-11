@@ -465,3 +465,36 @@ def test_duplicate_tool_use_ids_are_kept_without_tripping_the_fail_safe():
     assert [i["text"] for m in compacted for i in m.get("toolResults", [])][:2] == [
         LISTING, LISTING + "\nlib"]
     assert text_of(compacted, "c3") == "[removed: re-read q.py to recover]"
+
+
+# -- temp paths (v0.7 DEV audit): a temp file may be gone when the agent re-reads it ----------
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        ("Read", {"file_path": "/tmp/report.txt"}, NUMBERED),
+        ("Read", {"file_path": "/private/tmp/claude-501/tasks/b1.output"}, NUMBERED),
+        ("Read", {"file_path": "/var/folders/xy/T/out.log"}, NUMBERED),
+        ("Bash", {"command": "cat out.log", "cwd": "/tmp/run"}, FILE),
+        ("Bash", {"command": "ls /tmp/run"}, LISTING),
+        ("terminal", {"command": "ls", "workdir": "/private/var/folders/xy/T"}, LISTING),
+    ],
+)
+def test_temp_paths_are_kept(call):
+    _r, compacted, d = run(convo(call, *filler()))
+    assert d["c1"]["decision"] == "keep"
+    assert d["c1"]["reason"] == "temp_path"
+    assert text_of(compacted, "c1") == call[2]
+
+
+def test_verify_rejects_a_pointer_to_a_temp_file():
+    messages = convo(("Read", {"file_path": "/tmp/report.txt"}, NUMBERED), *filler())
+    forged = copy.deepcopy(messages)
+    forged[2]["toolResults"][0]["text"] = "[removed: re-read /tmp/report.txt to recover]"
+    assert verify_recoverable({"messages": messages}, forged)
+
+
+def test_tmp_in_a_repo_path_is_not_a_temp_path():
+    _r, compacted, _d = run(convo(("Read", {"file_path": "/repo/tmp/x.py"}, NUMBERED), *filler()))
+    assert text_of(compacted, "c1") == "[removed: re-read /repo/tmp/x.py to recover]"
