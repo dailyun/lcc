@@ -1055,8 +1055,9 @@ def compact_transcript(request: TranscriptCompactionRequest) -> TranscriptCompac
         # Re-hash right before emitting: a file that changed since its check is kept. Turning
         # a replace into a keep only restores original bytes, so the verified output stays valid.
         decisions = [
-            dict(d, decision="keep", reason="keep_disk_changed_before_emit",
-                 chars_after=d["chars"])
+            # Drop the pointer fields too: a kept call must not look like a pointer in reports.
+            {k: v for k, v in d.items() if k not in ("note", "recover", "disk", "recoverability_check")}
+            | {"decision": "keep", "reason": "keep_disk_changed_before_emit", "chars_after": d["chars"]}
             if d["decision"] == "replace" and "disk" in d
             and not disk_unchanged(d["disk"], request.workspace_root)  # type: ignore[arg-type]
             else d

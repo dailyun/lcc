@@ -352,6 +352,8 @@ def test_file_changed_between_check_and_emit_is_kept(disk, monkeypatch):
     assert d["c1"]["decision"] == "keep"
     assert d["c1"]["reason"] == "keep_disk_changed_before_emit"
     assert text_of(compacted, "c1") == NUMBERED
+    # A demoted decision must not still look like a pointer to report consumers.
+    assert not {"note", "recover", "disk", "recoverability_check"} & set(d["c1"])
     assert result.report["tool_calls_replaced"] == 0
 
 
