@@ -9,10 +9,12 @@ removed too. Text and tool inputs never change.
 from __future__ import annotations
 
 import copy
+import re
 
 import pytest
 
 import lcc.relevance.transcript as transcript_module
+import lcc.relevance.transcript_recoverable as recoverable_module
 from lcc.relevance.transcript import (
     TranscriptCompactionRequest,
     compact_transcript,
@@ -34,6 +36,15 @@ def _no_judge(monkeypatch):
         raise AssertionError("provider='rules' must never resolve a judge")
 
     monkeypatch.setattr(transcript_module, "_resolve_client", refuse)
+
+
+@pytest.fixture
+def disk(tmp_path, monkeypatch):
+    monkeypatch.setattr(recoverable_module, "_TEMP", re.compile(r"(?!)"))
+    return tmp_path
+
+
+CMD = {"allow_command_pointers": True}
 
 
 def convo(*calls, goal: str = "fix the parser", tail: int = 1) -> list[dict]:
@@ -64,7 +75,8 @@ def run(messages: list[dict], **kwargs):
     )
     assert messages == original, "the input payload must not be mutated"
     compacted = messages_to_payload(result.messages)
-    assert verify_recoverable({"messages": messages}, compacted) == []
+    allow = kwargs.get("allow_command_pointers", False)
+    assert verify_recoverable({"messages": messages}, compacted, allow_command_pointers=allow) == []
     assert [m["text"] for m in compacted] == [m["text"] for m in messages]
     return result, compacted, {d["id"]: d for d in result.decisions}
 
@@ -86,36 +98,38 @@ def filler(n: int = 1):
 
 
 def test_whole_file_read_is_replaced_by_a_reread_pointer():
-    result, compacted, d = run(convo(("Read", {"file_path": "src/p.py"}, NUMBERED), *filler()))
+    result, compacted, d = run(convo(("Read", {"file_path": "/r/src/p.py"}, NUMBERED), *filler()))
     assert d["c1"]["decision"] == "replace"
     assert d["c1"]["reason"] == "recoverable_file_read"
-    assert text_of(compacted, "c1") == "[removed: re-read src/p.py to recover]"
+    assert text_of(compacted, "c1") == "[removed: re-read /r/src/p.py to recover]"
     assert d["c1"]["recoverability_check"] == "transcript_proxy"
     assert result.report["rules_mode"] == "recoverable"
     assert result.report["recoverability_check"] == "transcript_proxy"
     assert result.report["semantic_guarantee"] == "recoverable"
     assert result.report["tool_calls_replaced"] == 1
-    assert compacted[1]["toolUses"][0]["input"] == {"file_path": "src/p.py"}
+    assert compacted[1]["toolUses"][0]["input"] == {"file_path": "/r/src/p.py"}
 
 
 def test_partial_read_pointer_names_its_lines():
     part = "\n".join(NUMBERED.split("\n")[4:12])
     _r, compacted, _d = run(
-        convo(("Read", {"file_path": "p.py", "offset": 5, "limit": 8}, part), *filler())
+        convo(("Read", {"file_path": "/r/p.py", "offset": 5, "limit": 8}, part), *filler())
     )
-    assert text_of(compacted, "c1") == "[removed: re-read p.py (lines 5-12) to recover]"
+    assert text_of(compacted, "c1") == "[removed: re-read /r/p.py (lines 5-12) to recover]"
 
 
 @pytest.mark.parametrize(
-    "cmd,pointer",
+    "cmd,out,pointer",
     [
-        ("cat src/p.py", "[removed: re-read src/p.py to recover]"),
-        ("sed -n '5,12p' src/p.py", "[removed: re-read src/p.py (lines 5-12) to recover]"),
-        ("head -n 12 src/p.py", "[removed: re-read src/p.py (lines 1-12) to recover]"),
+        ("cat src/p.py", FILE, "[removed: re-read src/p.py (cwd /r) to recover]"),
+        ("sed -n '5,12p' src/p.py", "\n".join(LINES[4:12]) + "\n",
+         "[removed: re-read src/p.py (lines 5-12) (cwd /r) to recover]"),
+        ("head -n 12 src/p.py", "\n".join(LINES[:12]) + "\n",
+         "[removed: re-read src/p.py (lines 1-12) (cwd /r) to recover]"),
     ],
 )
-def test_shell_reads_of_one_file_are_file_reads(cmd, pointer):
-    _r, compacted, d = run(convo(("Bash", {"command": cmd}, FILE), *filler()))
+def test_shell_reads_of_one_file_are_file_reads(cmd, out, pointer):
+    _r, compacted, d = run(convo(("Bash", {"command": cmd, "cwd": "/r"}, out), *filler()))
     assert d["c1"]["reason"] == "recoverable_file_read"
     assert text_of(compacted, "c1") == pointer
 
@@ -138,8 +152,8 @@ def test_codex_exec_read_with_nonzero_exit_is_kept():
 @pytest.mark.parametrize(
     "later",
     [
-        ("Edit", {"file_path": "src/p.py", "old_string": "a", "new_string": "b"}, "ok"),
-        ("Write", {"file_path": "src/p.py", "content": "x"}, "ok"),
+        ("Edit", {"file_path": "/r/src/p.py", "old_string": "a", "new_string": "b"}, "ok"),
+        ("Write", {"file_path": "/r/src/p.py", "content": "x"}, "ok"),
         ("apply_patch", {"input": "*** Begin Patch\n*** Update File: src/p.py\n@@\n-a\n+b"}, "ok"),
         ("Bash", {"command": "rm src/p.py"}, ""),
         ("Bash", {"command": "sed -i 's/a/b/' src/p.py"}, ""),
@@ -147,7 +161,7 @@ def test_codex_exec_read_with_nonzero_exit_is_kept():
     ],
 )
 def test_file_written_later_is_kept(later):
-    _r, compacted, d = run(convo(("Read", {"file_path": "src/p.py"}, NUMBERED), later, *filler()))
+    _r, compacted, d = run(convo(("Read", {"file_path": "/r/src/p.py"}, NUMBERED), later, *filler()))
     assert d["c1"]["decision"] == "keep"
     assert text_of(compacted, "c1") == NUMBERED
 
@@ -175,46 +189,46 @@ def test_read_named_in_a_recent_user_turn_is_kept():
 # -- disk check ------------------------------------------------------------------------
 
 
-def test_disk_check_passes_when_the_file_still_holds_the_content(tmp_path):
-    (tmp_path / "p.py").write_text(FILE)
-    result, compacted, d = run(convo(("Read", {"file_path": "p.py"}, NUMBERED), *filler()),
-                               workspace_root=str(tmp_path))
+def test_disk_check_passes_when_the_file_still_holds_the_content(disk):
+    (disk / "p.py").write_text(FILE)
+    result, compacted, d = run(convo(("Read", {"file_path": str(disk / "p.py")}, NUMBERED),
+                                     *filler()), workspace_root=str(disk))
     assert d["c1"]["decision"] == "replace"
     assert d["c1"]["recoverability_check"] == "disk"
     assert result.report["recoverability_check"] == "disk"
 
 
-def test_disk_check_keeps_a_read_the_file_no_longer_matches(tmp_path):
-    (tmp_path / "p.py").write_text(FILE.replace("line 7 of", "line seven of"))
-    _r, compacted, d = run(convo(("Read", {"file_path": "p.py"}, NUMBERED), *filler()),
-                           workspace_root=str(tmp_path))
+def test_disk_check_keeps_a_read_the_file_no_longer_matches(disk):
+    (disk / "p.py").write_text(FILE.replace("line 7 of", "line seven of"))
+    _r, compacted, d = run(convo(("Read", {"file_path": str(disk / "p.py")}, NUMBERED),
+                                 *filler()), workspace_root=str(disk))
     assert d["c1"]["decision"] == "keep"
     assert d["c1"]["reason"] == "disk_content_differs"
     assert text_of(compacted, "c1") == NUMBERED
 
 
-def test_disk_check_partial_range(tmp_path):
-    (tmp_path / "p.py").write_text(FILE)
-    _r, _c, d = run(convo(("Bash", {"command": "sed -n '5,12p' p.py"},
+def test_disk_check_partial_range(disk):
+    (disk / "p.py").write_text(FILE)
+    _r, _c, d = run(convo(("Bash", {"command": "sed -n '5,12p' p.py", "cwd": str(disk)},
                                     "\n".join(LINES[4:12]) + "\n"), *filler()),
-                    workspace_root=str(tmp_path))
+                    workspace_root=str(disk))
     assert d["c1"]["decision"] == "replace"
-    (tmp_path / "p.py").write_text("short\n")
-    _r, _c, d = run(convo(("Bash", {"command": "sed -n '5,12p' p.py"},
+    (disk / "p.py").write_text("short\n")
+    _r, _c, d = run(convo(("Bash", {"command": "sed -n '5,12p' p.py", "cwd": str(disk)},
                                     "\n".join(LINES[4:12]) + "\n"), *filler()),
-                    workspace_root=str(tmp_path))
+                    workspace_root=str(disk))
     assert d["c1"]["decision"] == "keep"
 
 
-def test_disk_check_missing_file_is_kept(tmp_path):
-    _r, _c, d = run(convo(("Read", {"file_path": "gone.py"}, NUMBERED), *filler()),
-                    workspace_root=str(tmp_path))
+def test_disk_check_missing_file_is_kept(disk):
+    _r, _c, d = run(convo(("Read", {"file_path": str(disk / "gone.py")}, NUMBERED), *filler()),
+                    workspace_root=str(disk))
     assert d["c1"]["decision"] == "keep"
 
 
-def test_disk_check_can_be_turned_off(tmp_path):
-    result, _c, d = run(convo(("Read", {"file_path": "gone.py"}, NUMBERED), *filler()),
-                        workspace_root=str(tmp_path), disk_check=False)
+def test_disk_check_can_be_turned_off(disk):
+    result, _c, d = run(convo(("Read", {"file_path": str(disk / "gone.py")}, NUMBERED),
+                              *filler()), workspace_root=str(disk), disk_check=False)
     assert d["c1"]["decision"] == "replace"
     assert result.report["recoverability_check"] == "transcript_proxy"
 
@@ -223,7 +237,7 @@ def test_disk_check_can_be_turned_off(tmp_path):
 
 
 def test_read_only_command_is_replaced_by_a_rerun_pointer():
-    _r, compacted, d = run(convo(("Bash", {"command": "ls src"}, LISTING), *filler()))
+    _r, compacted, d = run(convo(("Bash", {"command": "ls src"}, LISTING), *filler()), **CMD)
     assert d["c1"]["reason"] == "recoverable_read_only_command"
     assert text_of(compacted, "c1") == "[removed: re-run `ls src` to recover]"
 
@@ -299,7 +313,7 @@ def test_lossless_dedupe_still_applies():
 
 def test_dedupe_never_targets_a_replaced_result():
     _r, compacted, d = run(convo(("Bash", {"command": "ls src"}, LISTING),
-                                 ("Bash", {"command": "ls src"}, LISTING), *filler()))
+                                 ("Bash", {"command": "ls src"}, LISTING), *filler()), **CMD)
     assert d["c2"]["decision"] == "replace"
     assert d["c1"]["decision"] == "replace"
 
@@ -348,15 +362,16 @@ def test_verify_rejects_changed_text_or_inputs():
     ],
 )
 def test_hermes_terminal_and_dir_level_writes_invalidate_file_pointers(later):
-    _r, compacted, d = run(convo(("Read", {"file_path": "src/p.py"}, NUMBERED), later, *filler()))
+    _r, compacted, d = run(convo(("Read", {"file_path": "/r/src/p.py"}, NUMBERED), later, *filler()))
     assert d["c1"]["decision"] == "keep"
     assert d["c1"]["reason"] == "file_written_later"
 
 
 def test_hermes_terminal_read_is_a_shell_read():
-    _r, compacted, d = run(convo(("terminal", {"command": "cat src/p.py"}, FILE), *filler()))
+    _r, compacted, d = run(convo(("terminal", {"command": "cat src/p.py", "workdir": "/r"}, FILE),
+                                 *filler()))
     assert d["c1"]["reason"] == "recoverable_file_read"
-    assert text_of(compacted, "c1") == "[removed: re-read src/p.py to recover]"
+    assert text_of(compacted, "c1") == "[removed: re-read src/p.py (cwd /r) to recover]"
 
 
 def test_background_terminal_output_is_not_command_output():
@@ -383,11 +398,10 @@ def test_background_terminal_output_is_not_command_output():
                            "ok")),
         ("wc -l src/a.py", ("Bash", {"command": "pytest -q"}, "1 passed")),
         ("ls src", ("Bash", {"command": "python gen.py"}, "")),
-        ("tail -n 5 src/p.py", ("Bash", {"command": "make"}, "")),
     ],
 )
 def test_command_output_changed_later_is_kept(cmd, later):
-    _r, compacted, d = run(convo(("Bash", {"command": cmd}, LISTING), later, *filler()))
+    _r, compacted, d = run(convo(("Bash", {"command": cmd}, LISTING), later, *filler()), **CMD)
     assert d["c1"]["decision"] == "keep"
     assert d["c1"]["reason"] == "command_output_changed_later"
     assert text_of(compacted, "c1") == LISTING
@@ -403,7 +417,7 @@ def test_command_output_changed_later_is_kept(cmd, later):
     ],
 )
 def test_command_output_untouched_later_is_replaced(cmd, later):
-    _r, _c, d = run(convo(("Bash", {"command": cmd}, LISTING), later, *filler()))
+    _r, _c, d = run(convo(("Bash", {"command": cmd}, LISTING), later, *filler()), **CMD)
     assert d["c1"]["decision"] == "replace"
 
 
@@ -414,7 +428,7 @@ def test_pointers_name_the_working_directory():
     _r, compacted, _d = run(convo(
         ("terminal", {"command": "ls src", "workdir": "/repo"}, LISTING),
         ("Read", {"file_path": "p.py", "cwd": "/repo"}, NUMBERED),
-        *filler()))
+        *filler()), **CMD)
     assert text_of(compacted, "c1") == "[removed: re-run `ls src` in /repo to recover]"
     assert text_of(compacted, "c2") == "[removed: re-read p.py (cwd /repo) to recover]"
 
@@ -452,19 +466,19 @@ def test_empty_or_reversed_ranges_are_kept(cmd):
 def test_duplicate_tool_use_ids_are_kept_without_tripping_the_fail_safe():
     messages = convo(("Bash", {"command": "ls src"}, LISTING),
                      ("Bash", {"command": "ls lib"}, LISTING + "\nlib"),
-                     ("Read", {"file_path": "q.py"}, NUMBERED),
+                     ("Read", {"file_path": "/r/q.py"}, NUMBERED),
                      *filler())
     for message in messages[3:5]:  # second call reuses c1's id
         for block in message.get("toolUses", []) + message.get("toolResults", []):
             block["id"] = "c1"
-    result, compacted, _d = run(messages)
+    result, compacted, _d = run(messages, **CMD)
     assert not result.report["degraded"], result.report["degradation_reason"]
     assert result.report["lossless_violations"] == []
     reasons = [x["reason"] for x in result.decisions if x["id"] == "c1"]
     assert reasons == ["duplicate_tool_use_id", "duplicate_tool_use_id"]
     assert [i["text"] for m in compacted for i in m.get("toolResults", [])][:2] == [
         LISTING, LISTING + "\nlib"]
-    assert text_of(compacted, "c3") == "[removed: re-read q.py to recover]"
+    assert text_of(compacted, "c3") == "[removed: re-read /r/q.py to recover]"
 
 
 # -- temp paths (v0.7 DEV audit): a temp file may be gone when the agent re-reads it ----------
@@ -498,3 +512,144 @@ def test_verify_rejects_a_pointer_to_a_temp_file():
 def test_tmp_in_a_repo_path_is_not_a_temp_path():
     _r, compacted, _d = run(convo(("Read", {"file_path": "/repo/tmp/x.py"}, NUMBERED), *filler()))
     assert text_of(compacted, "c1") == "[removed: re-read /repo/tmp/x.py to recover]"
+
+
+# -- v0.7 review: only ever turn a replace into a keep ---------------------------------------
+
+
+# H1: a later shell call off the allowlist (or an unknown tool) may write any file it can reach.
+@pytest.mark.parametrize(
+    "later",
+    [
+        ("Bash", {"command": "python gen.py"}, ""),
+        ("Bash", {"command": "make"}, ""),
+        ("Bash", {"command": "npm run build"}, ""),
+        ("Bash", {"command": "yarn"}, ""),
+        ("Bash", {"command": "pip install -e ."}, ""),
+        ("Bash", {"command": "./scripts/fmt.sh"}, ""),
+        ("Bash", {"command": "git commit -am x"}, ""),
+        ("terminal", {"command": "pytest -q"}, "1 passed"),
+        ("exec_command", {"cmd": "cargo fmt", "workdir": "/r"}, ""),
+        ("Bash", {"command": "cd /r && make", "cwd": "/elsewhere"}, ""),
+        ("mcp__fs__do_things", {"x": 1}, "ok"),
+        ("execute_code", {"code": "open('a', 'w')"}, ""),
+    ],
+)
+def test_opaque_later_write_invalidates_file_pointers(later):
+    _r, compacted, d = run(convo(("Read", {"file_path": "/r/src/p.py"}, NUMBERED), later, *filler()))
+    assert d["c1"]["decision"] == "keep"
+    assert d["c1"]["reason"] == "file_written_later"
+    assert text_of(compacted, "c1") == NUMBERED
+
+
+def test_opaque_later_write_outside_the_file_cwd_does_not_invalidate():
+    _r, _c, d = run(convo(("Read", {"file_path": "/r/src/p.py"}, NUMBERED),
+                          ("exec_command", {"cmd": "make", "workdir": "/other"}, ""), *filler()))
+    assert d["c1"]["decision"] == "replace"
+    _r, _c, d = run(convo(("Read", {"file_path": "/r/src/p.py"}, NUMBERED),
+                          ("exec_command", {"cmd": "make", "workdir": "/r"}, ""), *filler()))
+    assert d["c1"]["decision"] == "keep"
+
+
+def test_later_read_only_shell_call_does_not_invalidate():
+    _r, _c, d = run(convo(("Read", {"file_path": "/r/src/p.py"}, NUMBERED),
+                          ("Bash", {"command": "ls src"}, "a"), *filler()))
+    assert d["c1"]["decision"] == "replace"
+
+
+# H2: command pointers are off by default; the path stays, tested both ways.
+@pytest.mark.parametrize("allow", [False, True])
+def test_command_pointers_are_opt_in(allow):
+    _r, compacted, d = run(convo(("Bash", {"command": "ls src"}, LISTING),
+                                 ("Bash", {"command": "tail -n 5 /r/p.py"}, FILE), *filler()),
+                           allow_command_pointers=allow)
+    if allow:
+        assert text_of(compacted, "c1") == "[removed: re-run `ls src` to recover]"
+        assert text_of(compacted, "c2") == "[removed: re-run `tail -n 5 /r/p.py` to recover]"
+    else:
+        assert d["c1"]["decision"] == d["c2"]["decision"] == "keep"
+        assert d["c1"]["reason"] == d["c2"]["reason"] == "command_pointers_disabled"
+
+
+def test_verify_rejects_a_command_pointer_unless_allowed():
+    messages = convo(("Bash", {"command": "ls src"}, LISTING), *filler())
+    forged = copy.deepcopy(messages)
+    forged[2]["toolResults"][0]["text"] = "[removed: re-run `ls src` to recover]"
+    assert verify_recoverable({"messages": messages}, forged)
+    assert verify_recoverable({"messages": messages}, forged, allow_command_pointers=True) == []
+
+
+# M1: globs, braces and several files in one read are never file pointers.
+@pytest.mark.parametrize(
+    "call",
+    [
+        ("Bash", {"command": "cat src/*.py", "cwd": "/r"}, FILE),
+        ("Bash", {"command": "cat src/{a,b}.py", "cwd": "/r"}, FILE),
+        ("Bash", {"command": "head -n 3 src/p?.py", "cwd": "/r"}, "\n".join(LINES[:3]) + "\n"),
+        ("Bash", {"command": "cat a.py b.py", "cwd": "/r"}, FILE),
+        ("Bash", {"command": "cat ~/p.py"}, FILE),
+    ],
+)
+def test_globs_and_multiple_files_are_kept(call):
+    _r, compacted, d = run(convo(call, *filler()))
+    assert d["c1"]["decision"] == "keep"
+    assert text_of(compacted, "c1") == call[2]
+
+
+# M2: a relative path is a pointer only with an explicit working directory.
+@pytest.mark.parametrize(
+    "call",
+    [
+        ("Read", {"file_path": "src/p.py"}, NUMBERED),
+        ("Bash", {"command": "cat src/p.py"}, FILE),
+        ("Bash", {"command": "cat src/p.py", "cwd": "rel"}, FILE),
+        ("terminal", {"command": "sed -n '1,39p' p.py"}, FILE),
+    ],
+)
+def test_relative_path_without_cwd_is_kept(call):
+    _r, compacted, d = run(convo(call, *filler()))
+    assert d["c1"]["decision"] == "keep"
+    assert d["c1"]["reason"] == "relative_path_without_cwd"
+    assert text_of(compacted, "c1") == call[2]
+
+
+def test_verify_rejects_a_relative_file_pointer_without_cwd():
+    messages = convo(("Read", {"file_path": "a.py"}, NUMBERED), *filler())
+    forged = copy.deepcopy(messages)
+    forged[2]["toolResults"][0]["text"] = "[removed: re-read a.py to recover]"
+    assert verify_recoverable({"messages": messages}, forged)
+
+
+# L1: follow modes, stdin and device/proc files are never read-only and never pointers.
+@pytest.mark.parametrize(
+    "cmd",
+    ["tail -fn 20 log", "tail -qf log", "tail -F log", "tail -nf 5 log", "tail --follow=name log",
+     "cat -", "cat", "head -n 5 -", "wc -l", "cat /dev/urandom", "head -c 10 /dev/random",
+     "cat /proc/self/status", "nl -"],
+)
+def test_follow_stdin_and_devices_are_not_read_only(cmd):
+    assert not is_read_only_command(cmd)
+
+
+@pytest.mark.parametrize("path", ["/dev/stdin", "/dev/fd/0", "/proc/1/environ", "-"])
+def test_reads_of_devices_or_stdin_are_kept(path):
+    _r, compacted, d = run(convo(("Read", {"file_path": path}, NUMBERED), *filler()), **CMD)
+    assert d["c1"]["decision"] == "keep"
+
+
+# L2: a range the output does not fill is kept, not clamped by guess.
+@pytest.mark.parametrize(
+    "call",
+    [
+        ("Bash", {"command": "sed -n '5,50p' p.py", "cwd": "/r"}, "\n".join(LINES[4:]) + "\n"),
+        ("Bash", {"command": "head -n 100 p.py", "cwd": "/r"}, FILE),
+        ("Read", {"file_path": "/r/p.py", "offset": 5, "limit": 3},
+         "\n".join(NUMBERED.split("\n")[4:12])),
+        ("Read", {"file_path": "/r/p.py", "offset": 7, "limit": 8},
+         "\n".join(NUMBERED.split("\n")[4:12])),
+    ],
+)
+def test_ranges_beyond_the_returned_lines_are_kept(call):
+    _r, compacted, d = run(convo(call, *filler()))
+    assert d["c1"]["decision"] == "keep"
+    assert text_of(compacted, "c1") == call[2]

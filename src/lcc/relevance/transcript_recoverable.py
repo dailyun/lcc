@@ -21,6 +21,19 @@ tool result with a recovery pointer:
   worktree-wide git command, and — for git reads or commands without explicit paths — no
   write at all; otherwise no write naming one of its paths.
 - Pointers name the call's working directory when it had one: ``(cwd <dir>)`` / ``in <dir>``.
+
+Every rule below can only turn a replace into a keep (v0.7 review):
+
+- Opaque later writes: a later shell call off the allowlist (script, build, install, test run,
+  git write) or an unknown tool may write any file under its working directory, so it
+  invalidates every earlier file pointer under that directory, or all of them when its cwd is
+  unknown, relative, or it changes directory (``cd``, ``-C``).
+- Command pointers are off unless ``allow_command_pointers``; a read that could only get a
+  command pointer (``tail -n N``, a range the output does not fill) is then kept.
+- A file pointer needs an absolute path or an absolute working directory on the call.
+- Shell reads with globs, braces, ``~`` or several files, reads of ``-``/stdin and of
+  ``/dev``, ``/proc``, ``/sys``, and ``tail`` follow modes are never pointers.
+- A line range the returned output does not fill exactly is kept, never clamped.
 - Calls whose id is carried by more than one call or result are always kept.
 - Calls in a system temp dir (``/tmp``, ``/var/tmp``, ``/var/folders``, ``/dev/shm``: cwd, file
   or command argument) are kept: the file may be gone when the agent re-reads it.
@@ -34,6 +47,7 @@ or command the goal or a recent user turn names. Text and tool inputs never chan
 
 from __future__ import annotations
 
+import posixpath
 import re
 import shlex
 from pathlib import Path
@@ -88,6 +102,14 @@ _CODEX_HEAD = re.compile(
 _EXIT = re.compile(r"^Process exited with code (\d+)")
 #: System temp dirs: their files can be cleared before the agent re-reads them.
 _TEMP = re.compile(r"^(?:/private)?/(?:tmp|var/tmp|var/folders)(?:/|$)|^/dev/shm(?:/|$)")
+#: Device, process and kernel files: their content is not the file's, re-reading differs.
+_SPECIAL = re.compile(r"^(?:/private)?/(?:dev|proc|sys)(?:/|$)")
+#: Shell expansions that can name more than one file (or another file) than the literal text.
+_GLOB = re.compile(r"[*?\[\]{}]")
+#: An opaque call that changes directory may write outside its own cwd.
+_CHDIR = re.compile(r"\b(?:cd|pushd)\b|(?:^|\s)-C\b|--(?:prefix|cwd|directory)\b")
+#: Programs that read stdin when given no file operand.
+_STDIN_PROGS = {"cat", "head", "tail", "nl", "wc"}
 
 
 def shell_command(call: Any) -> str | None:
@@ -121,12 +143,34 @@ def _argv(cmd: str) -> list[str] | None:
     return argv
 
 
+def _operands(args: list[str]) -> list[str]:
+    """Non-flag arguments; the value of ``-n``/``-c`` is a flag value, not a file."""
+    out, skip = [], False
+    for arg in args:
+        if skip:
+            skip = False
+        elif arg in {"-n", "-c", "--lines", "--bytes", "-e", "-f"}:
+            skip = True
+        elif arg == "-" or not arg.startswith("-"):
+            out.append(arg)
+    return out
+
+
 def is_read_only_command(cmd: str) -> bool:
     """``cmd`` is on the read-only allowlist: re-running it changes nothing."""
     argv = _argv(cmd)
     if argv is None:
         return False
     prog, args = argv[0].rsplit("/", 1)[-1], argv[1:]
+    # stdin and device/proc files: re-running does not reproduce the output.
+    if any(a == "-" or _SPECIAL.match(a) for a in args):
+        return False
+    if prog in _STDIN_PROGS and not _operands(args):
+        return False
+    if prog in {"grep", "egrep", "fgrep"} and len(_operands(args)) < 2 and not any(
+        a.startswith("-") and not a.startswith("--") and ("r" in a or "R" in a) for a in args
+    ):
+        return False  # ponytail: ``-e PAT FILE`` counts as stdin too; that only keeps more
     if prog in {"python", "python3"} and args == ["-V"]:
         return True
     if prog in _VERSION_TOOLS and args == ["--version"]:
@@ -141,7 +185,12 @@ def is_read_only_command(cmd: str) -> bool:
             for a in args
         )
     if prog == "tail":
-        return not any(a in {"-f", "-F"} or a.startswith("--follow") for a in args)
+        # -f/-F anywhere in a short-flag group (-fn, -qf, -nf) or --follow/--retry follows.
+        return not any(
+            a.startswith(("--follow", "--retry"))
+            or (a.startswith("-") and not a.startswith("--") and ("f" in a or "F" in a))
+            for a in args
+        )
     if prog == "rg":
         return not any(a.startswith("--pre") for a in args)
     if prog == "find":
@@ -171,6 +220,15 @@ def _sed_range(args: list[str]) -> tuple[tuple[int, int], str] | None:
 
 def _file_read(call: Any) -> tuple[str, str] | None:
     """(path, range spec) for a read of one file. Spec: ``all``, ``a-b`` or ``tail:N``."""
+    read = _one_file_read(call)
+    if read is None or read[0] == "-" or _SPECIAL.match(read[0]):
+        return None
+    if call.tool not in FILE_READ_TOOLS and (_GLOB.search(read[0]) or read[0].startswith("~")):
+        return None  # the shell expands it: maybe several files, maybe another one
+    return read
+
+
+def _one_file_read(call: Any) -> tuple[str, str] | None:
     if call.tool in FILE_READ_TOOLS:
         path = call.input.get("file_path") or call.input.get("path") or call.input.get(
             "notebook_path"
@@ -244,13 +302,21 @@ def _pointer_lines(call: Any, body: str, spec: str) -> tuple[int, int] | None | 
         if rows is None:
             return None if spec == "all" else "skip"
         first, last = rows[0][0], rows[-1][0]
+        if spec == "numbered":
+            offset, limit = call.input.get("offset"), call.input.get("limit")
+            if offset is not None and (not isinstance(offset, int) or first != max(offset, 1)):
+                return "skip"
+            if limit is not None and (not isinstance(limit, int) or len(rows) > limit):
+                return "skip"
         return None if spec == "all" and first == 1 else (first, last)
     if spec == "all":
         return None
     if spec == "empty" or spec.startswith("tail:"):
         return "skip"  # ponytail: tail ranges need the file length; kept rather than guessed.
-    a, b = spec.split("-")
-    return int(a), int(b)
+    a, b = (int(x) for x in spec.split("-"))
+    if len(_file_lines(body)) != b - a + 1:
+        return "skip"  # the file is shorter than the range: never clamp by guess
+    return a, b
 
 
 def _disk_matches(call: Any, path: str, spec: str, body: str, root: Path) -> bool:
@@ -298,6 +364,29 @@ def _temp(call: Any) -> bool:
     read = _file_read(call)
     paths = [_cwd(call) or "", read[0] if read else ""] + ((_argv(cmd) or [])[1:] if cmd else [])
     return any(_TEMP.match(p) for p in paths)
+
+
+def _resolved(path: str, cwd: str | None) -> str | None:
+    """The absolute path a read names, or None when it is relative to an unknown directory."""
+    if path.startswith("/"):
+        return posixpath.normpath(path)
+    if cwd and cwd.startswith("/"):
+        return posixpath.normpath(posixpath.join(cwd, path))
+    return None
+
+
+def _under(path: str, directory: str) -> bool:
+    path, directory = (p.removeprefix("/private") for p in (path, directory))
+    directory = directory.rstrip("/")
+    return not directory or path == directory or path.startswith(directory + "/")
+
+
+def _opaque_dir(call: Any, text: str) -> str | None:
+    """The directory an opaque call may write under; None means anywhere."""
+    cwd = _cwd(call)
+    if cwd is None or not cwd.startswith("/") or _CHDIR.search(text):
+        return None
+    return posixpath.normpath(cwd)
 
 
 def _file_pointer(path: str, lines: tuple[int, int] | None, cwd: str | None = None) -> str:
@@ -353,6 +442,7 @@ def recoverable_decisions(
     *,
     root: str | None = None,
     disk_check: bool = True,
+    allow_command_pointers: bool = False,
 ) -> list[dict[str, Any]]:
     """One decision per candidate: ``replace`` (with ``note``), lossless ``dedupe``, or ``keep``."""
     all_calls = [call for message in messages for call in message.tool_calls]
@@ -370,14 +460,17 @@ def recoverable_decisions(
     )
     # Walk backwards: for each call, what later calls might have written.
     # Keyed by position: ids can repeat (see ``duplicate_ids``).
-    later: dict[int, tuple[list[str], bool, bool]] = {}
+    later: dict[int, tuple[list[str], bool, bool, list[str | None]]] = {}
     texts: list[str] = []
+    dirs: list[str | None] = []  # where later opaque calls may have written (None: anywhere)
     worktree = opaque = False
     for call in reversed(all_calls):
-        later[id(call)] = (list(texts), worktree, opaque)
+        later[id(call)] = (list(texts), worktree, opaque, list(dirs))
         text, wholesale, unknown = _possible_writes(call)
         if text:
             texts.append(text)
+            if unknown:
+                dirs.append(_opaque_dir(call, text))
         worktree = worktree or wholesale
         opaque = opaque or (bool(text) and unknown)
     duplicated = duplicate_ids(messages)
@@ -390,7 +483,7 @@ def recoverable_decisions(
     reasons: dict[str, str] = {}
     def command_changed(cmd: str, call: Any) -> bool:
         """A later call may have changed ``cmd``'s output. When in doubt, it did."""
-        texts, wholesale, unknown = later[id(call)]
+        texts, wholesale, unknown, _dirs = later[id(call)]
         if wholesale or unknown:
             return True
         paths = _command_paths(cmd)
@@ -399,7 +492,10 @@ def recoverable_decisions(
         return any(_names_file(t, p) for t in texts for p in paths)
 
     def file_written(path: str, call: Any) -> bool:
-        texts, wholesale, _unknown = later[id(call)]
+        texts, wholesale, _unknown, dirs = later[id(call)]
+        target = _resolved(path, _cwd(call))
+        if any(d is None or target is None or _under(target, d) for d in dirs):
+            return True  # H1: a later opaque call may have written it
         return wholesale or any(
             _names_file(t, path)
             or (_DESTRUCTIVE.search(t) and any(_names_file(t, a) for a in _ancestors(path)))
@@ -437,6 +533,10 @@ def recoverable_decisions(
                 reason = "read_range_unknown"
             elif lines == "skip" and command_changed(cmd, call):  # type: ignore[arg-type]
                 reason = "command_output_changed_later"
+            elif lines == "skip" and not allow_command_pointers:
+                reason = "command_pointers_disabled"
+            elif lines != "skip" and _resolved(path, cwd) is None:
+                reason = "relative_path_without_cwd"
             elif use_disk and not _disk_matches(call, path, spec, body, root_path):  # type: ignore[arg-type]
                 reason = "disk_content_differs"
             else:
@@ -458,6 +558,9 @@ def recoverable_decisions(
             if command_changed(cmd, call):
                 reason = "command_output_changed_later"
         if hit is None and reason is None and cmd is not None and is_read_only_command(cmd):
+            if not allow_command_pointers:
+                reasons[call.id] = "command_pointers_disabled"
+                continue
             hit = {
                 "reason": "recoverable_read_only_command",
                 "note": _command_pointer(cmd, cwd),
@@ -483,24 +586,26 @@ def recoverable_decisions(
     return decisions
 
 
-def _valid_pointers(call: Any, original: str) -> set[str]:
+def _valid_pointers(call: Any, original: str, allow_command_pointers: bool) -> set[str]:
     """Every recovery pointer the planner could write for ``call`` and its original output:
     its own allowlisted command, or its own file with the exact line range and cwd."""
     pointers: set[str] = set()
     if _temp(call):
         return pointers
     cmd = shell_command(call)
-    if cmd is not None and is_read_only_command(cmd):
+    if allow_command_pointers and cmd is not None and is_read_only_command(cmd):
         pointers.add(_command_pointer(cmd, _cwd(call)))
     read = _file_read(call)
     if read is not None:
         lines = _pointer_lines(call, _body(original)[0], read[1])
-        if lines != "skip":
+        if lines != "skip" and _resolved(read[0], _cwd(call)) is not None:
             pointers.add(_file_pointer(read[0], lines, _cwd(call)))  # type: ignore[arg-type]
     return pointers
 
 
-def verify_recoverable(original_payload: Any, compacted_payload: Any) -> list[str]:
+def verify_recoverable(
+    original_payload: Any, compacted_payload: Any, *, allow_command_pointers: bool = False
+) -> list[str]:
     """Violations of the recoverable contract; ``[]`` is a pass.
 
     Messages, roles, texts and tool calls (id, tool, input) must be unchanged, and every
@@ -516,5 +621,5 @@ def verify_recoverable(original_payload: Any, compacted_payload: Any) -> list[st
         original_payload,
         compacted_payload,
         allow=lambda old, note: old.id in calls and old.id not in duplicated
-        and note in _valid_pointers(calls[old.id], old.text),
+        and note in _valid_pointers(calls[old.id], old.text, allow_command_pointers),
     )

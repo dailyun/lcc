@@ -137,6 +137,28 @@ test("buildCompactArgs prefers an explicit question, then the /compact instructi
   assert.equal(buildCompactArgs({ messages: [{ role: "assistant", text: "hi" }], options: {} }), null);
 });
 
+test("buildCompactArgs sends no rules_mode unless the user opts in", () => {
+  const args = buildCompactArgs({ messages: TRANSCRIPT, options: {}, cwd: "/repo" });
+  assert.equal("rules_mode" in args, false);
+  assert.equal("workspace_root" in args, false);
+  const lossless = buildCompactArgs({ messages: TRANSCRIPT, options: { provider: "rules", rulesMode: "lossless" }, cwd: "/repo" });
+  assert.equal(lossless.rules_mode, "lossless");
+  assert.equal("workspace_root" in lossless, false);
+  const bogus = buildCompactArgs({ messages: TRANSCRIPT, options: { rulesMode: "yolo" }, cwd: "/repo" });
+  assert.equal("rules_mode" in bogus, false);
+});
+
+test("buildCompactArgs passes the session cwd as workspace_root for rules_mode recoverable", () => {
+  const options = { provider: "rules", rulesMode: "recoverable" };
+  const args = buildCompactArgs({ messages: TRANSCRIPT, options, cwd: "/repo" });
+  assert.equal(args.provider, "rules");
+  assert.equal(args.rules_mode, "recoverable");
+  assert.equal(args.workspace_root, "/repo");
+  // No absolute cwd: no workspace_root (the server then falls back to the transcript proxy).
+  assert.equal("workspace_root" in buildCompactArgs({ messages: TRANSCRIPT, options, cwd: "rel" }), false);
+  assert.equal("workspace_root" in buildCompactArgs({ messages: TRANSCRIPT, options }), false);
+});
+
 test("parseToolResult reads the JSON out of the MCP content blocks", () => {
   const payload = { messages: [{ role: "user", text: "hi" }], report: { mode: "tool-calls" } };
   const parsed = parseToolResult([{ type: "text", text: JSON.stringify(payload) }]);

@@ -52,6 +52,10 @@ decides what a compaction produces. Configure `minReductionRatio`, `preserveRece
 `threshold`, `trimHeadChars`, `maxStateTokens`, `maxRequestTokens` and `question` through the
 plugin's config (`/plugin` → lcc, or `claude plugin install --config key=value`).
 
+`rulesMode` (with `provider: rules`) picks `lossless`, `recoverable` or `lossy`; empty keeps the
+server default. With `recoverable` the hook sends the session's working directory as
+`workspace_root`, so every removed file read is checked against the file on disk.
+
 ## Fallback is the default when anything is off
 
 The hook stands down — and Claude Code compacts the way it always did — when:

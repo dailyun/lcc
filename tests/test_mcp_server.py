@@ -419,7 +419,14 @@ def test_compact_transcript_runs_the_offline_rules_policy():
     assert decisions["a"]["reason"] == "superseded_by_later_call:b"
 
 
-def test_compact_transcript_accepts_rules_mode_recoverable_with_a_workspace(tmp_path):
+def test_compact_transcript_accepts_rules_mode_recoverable_with_a_workspace(
+    tmp_path, monkeypatch
+):
+    import re
+
+    import lcc.relevance.transcript_recoverable as recoverable
+
+    monkeypatch.setattr(recoverable, "_TEMP", re.compile(r"(?!)"))  # tmp_path is a temp dir
     body = "\n".join(f"line {n}" for n in range(1, 60)) + "\n"
     (tmp_path / "x.py").write_text(body)
     numbered = "\n".join(f"{n:>6}\t{line}" for n, line in enumerate(body.splitlines(), 1))
@@ -434,11 +441,11 @@ def test_compact_transcript_accepts_rules_mode_recoverable_with_a_workspace(tmp_
                     "messages": [
                         {"role": "user", "text": "fix it"},
                         {"role": "assistant", "text": "", "toolUses": [
-                            {"tool_use_id": "a", "tool": "Read", "input": {"file_path": "x.py"}}]},
+                            {"tool_use_id": "a", "tool": "Read", "input": {"file_path": str(tmp_path / "x.py")}}]},
                         {"role": "user", "text": "", "toolResults": [
                             {"tool_use_id": "a", "text": numbered}]},
                         {"role": "assistant", "text": "", "toolUses": [
-                            {"tool_use_id": "b", "tool": "Bash", "input": {"command": "pytest"}}]},
+                            {"tool_use_id": "b", "tool": "Grep", "input": {"pattern": "x"}}]},
                         {"role": "user", "text": "", "toolResults": [
                             {"tool_use_id": "b", "text": "1 passed"}]},
                         {"role": "assistant", "text": "done"},
@@ -457,4 +464,4 @@ def test_compact_transcript_accepts_rules_mode_recoverable_with_a_workspace(tmp_
     assert payload["report"]["recoverability_check"] == "disk"
     decisions = {d["id"]: d for d in payload["decisions"]}
     assert decisions["a"]["decision"] == "replace"
-    assert decisions["a"]["note"] == "[removed: re-read x.py to recover]"
+    assert decisions["a"]["note"] == f"[removed: re-read {tmp_path / 'x.py'} to recover]"

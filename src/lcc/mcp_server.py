@@ -108,6 +108,7 @@ def _tool_compact_transcript(args: dict[str, Any]) -> dict[str, Any]:
             rules_mode=str(args.get("rules_mode", "lossless")),
             workspace_root=args.get("workspace_root") or None,
             disk_check=bool(args.get("disk_check", True)),
+            allow_command_pointers=args.get("allow_command_pointers") is True,
         )
     )
     return {
@@ -287,6 +288,14 @@ TOOLS: dict[str, dict[str, Any]] = {
                     ),
                 },
                 "disk_check": {"type": "boolean", "default": True},
+                "allow_command_pointers": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "rules_mode 'recoverable' only: also replace allowlisted read-only "
+                        "command outputs with a re-run pointer. Off by default."
+                    ),
+                },
                 "threshold": {"type": "number", "default": 0.5},
                 "preserve_recent": {"type": "integer", "default": 6},
                 "trim_head_chars": {"type": "integer", "default": 300},

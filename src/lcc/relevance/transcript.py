@@ -160,6 +160,8 @@ class TranscriptCompactionRequest:
     #: (and ``disk_check`` is on) a file read is replaced only if the file still holds it.
     workspace_root: str | None = None
     disk_check: bool = True
+    #: ``recoverable`` only: also allow re-run command pointers (off since the v0.7 review).
+    allow_command_pointers: bool = False
 
 
 @dataclass
@@ -921,6 +923,7 @@ def compact_transcript(request: TranscriptCompactionRequest) -> TranscriptCompac
             raw_decisions = recoverable_decisions(
                 messages, candidates, request.question,
                 root=request.workspace_root, disk_check=request.disk_check,
+                allow_command_pointers=request.allow_command_pointers,
             )
         else:
             raw_decisions = rules_decisions(messages, candidates, request.question)
@@ -1023,8 +1026,11 @@ def compact_transcript(request: TranscriptCompactionRequest) -> TranscriptCompac
     if verified and decisions:
         # Belt and braces: the output is re-checked from the payloads alone. A violation
         # would be a bug in the policy, so the pass keeps everything instead of shipping it.
-        verify = verify_lossless if lossless else verify_recoverable
-        lossless_violations = verify(request.payload, messages_to_payload(rebuilt))
+        after = messages_to_payload(rebuilt)
+        lossless_violations = (
+            verify_lossless(request.payload, after) if lossless else verify_recoverable(
+                request.payload, after, allow_command_pointers=request.allow_command_pointers)
+        )
         if lossless_violations:
             mode = request.rules_mode
             degraded = True

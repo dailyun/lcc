@@ -47,6 +47,8 @@ export const register = (on, options) => {
       messages: event.messages ?? [],
       instructions: event.instructions,
       options: configured,
+      // ponytail: the hook runs in the session's process; event.cwd if the engine ever sends it.
+      cwd: event.cwd ?? process.cwd(),
     });
     if (!args) return next(event);
 
