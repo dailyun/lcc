@@ -1,8 +1,9 @@
 # lcc — Claude Code plugin
 
 Replaces Claude Code's compaction summary with **verbatim** compaction: every tool call is
-paired with its result, TypeSafe Jev is asked whether the call and its output are still
-needed, and the pairs it says are spent are dropped. Nothing is summarized, nothing is
+paired with its result, a judge (TypeSafe Jev by default, local Laya, or the offline `rules`
+policy) decides whether the call and its output are still needed, and the pairs it marks
+spent are dropped or trimmed. Nothing is summarized, nothing is
 rewritten — kept messages carry their original bytes, and user/assistant text is never
 touched at all.
 
@@ -23,7 +24,8 @@ claude plugin install lcc@lcc
 ```
 
 Requirements: Claude Code **2.1.274 or newer** (function hooks), the `lcc` CLI on `PATH`
-(the plugin's `.mcp.json` starts `lcc mcp`), and a TypeSafe API key.
+(the plugin's `.mcp.json` starts `lcc mcp`), and a TypeSafe API key for `provider: jev` or
+`auto` (`laya` and `rules` need none).
 
 For local development against a checkout:
 
@@ -86,8 +88,9 @@ It also skips `precompute` invocations, which install nothing.
   hook returns rebuilt messages rather than the engine's own objects. Claude Code rebuilds
   each returned message from `role`, `text` and tool blocks — which is why the hook refuses
   sessions carrying content it cannot rebuild.
-- **Needs a judge.** No key means no compaction: the plugin does not have, and does not fake,
-  an offline semantic path for tool-call relevance.
+- **The default provider needs a key.** With `provider: jev` and no key there is no
+  compaction. `provider: rules` runs offline with no model; it removes far less on real
+  sessions (see `docs/REAL_SESSION_BENCHMARKS.md`), so lower `minReductionRatio` to use it.
 - **Tool granularity.** A pair is kept, trimmed to its head, or dropped whole; a half-spent
   40K-char result is not half-summarized.
 

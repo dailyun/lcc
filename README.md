@@ -224,8 +224,10 @@ explain where evidence can still be lost. Preservation is not a security verdict
 
 The stdio MCP server exposes `compact`, `compact_transcript`, `inspect`,
 `prepare`, `explain` and `intake`. `compact` defaults to mechanical scoring.
-Tool-call transcripts use a semantic provider; user/assistant messages remain
-pinned. See [MCP](docs/MCP.md), [tool-call mode](docs/TOOL_CALLS.md) and
+Tool-call transcripts use a semantic provider (Jev or Laya) or the offline `rules`
+policy; user/assistant messages remain pinned. Results on real agent sessions:
+[real-session benchmarks](docs/REAL_SESSION_BENCHMARKS.md). See [MCP](docs/MCP.md),
+[tool-call mode](docs/TOOL_CALLS.md) and
 [Claude Code integration](docs/CLAUDE_CODE.md). Plugin transport and live model
 execution were not exercised by the offline usability benchmark.
 
