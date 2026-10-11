@@ -44,6 +44,9 @@ from lcc.relevance.transcript_recoverable import (
 from lcc.relevance.transcript_rules import rules_decisions
 from lcc.token_budget import count_tokens
 
+# Report fields that only a replaced (pointer) decision carries.
+_POINTER_FIELDS = ("note", "recover", "disk", "recoverability_check")
+
 TRANSCRIPT_SCHEMA_VERSION = "transcript-compaction-1.0"
 
 #: Why the local judge could not start, if it could not. Holds the most recent cause and
@@ -1056,8 +1059,9 @@ def compact_transcript(request: TranscriptCompactionRequest) -> TranscriptCompac
         # a replace into a keep only restores original bytes, so the verified output stays valid.
         decisions = [
             # Drop the pointer fields too: a kept call must not look like a pointer in reports.
-            {k: v for k, v in d.items() if k not in ("note", "recover", "disk", "recoverability_check")}
-            | {"decision": "keep", "reason": "keep_disk_changed_before_emit", "chars_after": d["chars"]}
+            {k: v for k, v in d.items() if k not in _POINTER_FIELDS}
+            | {"decision": "keep", "reason": "keep_disk_changed_before_emit",
+               "chars_after": d["chars"]}
             if d["decision"] == "replace" and "disk" in d
             and not disk_unchanged(d["disk"], request.workspace_root)  # type: ignore[arg-type]
             else d
