@@ -194,6 +194,7 @@ def test_disk_check_passes_when_the_file_still_holds_the_content(disk):
     result, compacted, d = run(convo(("Read", {"file_path": str(disk / "p.py")}, NUMBERED),
                                      *filler()), workspace_root=str(disk))
     assert d["c1"]["decision"] == "replace"
+    assert d["c1"]["reason"] == "replace_disk_verified"
     assert d["c1"]["recoverability_check"] == "disk"
     assert result.report["recoverability_check"] == "disk"
 
@@ -203,27 +204,158 @@ def test_disk_check_keeps_a_read_the_file_no_longer_matches(disk):
     _r, compacted, d = run(convo(("Read", {"file_path": str(disk / "p.py")}, NUMBERED),
                                  *filler()), workspace_root=str(disk))
     assert d["c1"]["decision"] == "keep"
-    assert d["c1"]["reason"] == "disk_content_differs"
+    assert d["c1"]["reason"] == "keep_disk_mismatch"
     assert text_of(compacted, "c1") == NUMBERED
 
 
+# Independent of the basetemp path length: the output is far longer than any pointer.
+WIDE = [f"{n:04d} " + "x" * 200 for n in range(1, 60)]
+
+
 def test_disk_check_partial_range(disk):
-    (disk / "p.py").write_text(FILE)
-    _r, _c, d = run(convo(("Bash", {"command": "sed -n '5,12p' p.py", "cwd": str(disk)},
-                                    "\n".join(LINES[4:12]) + "\n"), *filler()),
-                    workspace_root=str(disk))
+    sed = ("Bash", {"command": "sed -n '5,40p' p.py", "cwd": str(disk)},
+           "\n".join(WIDE[4:40]) + "\n")
+    (disk / "p.py").write_text("\n".join(WIDE) + "\n")
+    _r, _c, d = run(convo(sed, *filler()), workspace_root=str(disk))
     assert d["c1"]["decision"] == "replace"
     (disk / "p.py").write_text("short\n")
-    _r, _c, d = run(convo(("Bash", {"command": "sed -n '5,12p' p.py", "cwd": str(disk)},
-                                    "\n".join(LINES[4:12]) + "\n"), *filler()),
-                    workspace_root=str(disk))
+    _r, _c, d = run(convo(sed, *filler()), workspace_root=str(disk))
     assert d["c1"]["decision"] == "keep"
+    assert d["c1"]["reason"] == "keep_disk_mismatch"
+
+
+# -- disk-authoritative (owner decision 2026-10-11) ------------------------------------
+
+
+LATER_WRITES = [
+    ("Edit", {"file_path": "{p}", "old_string": "a", "new_string": "b"}, "ok"),
+    ("Write", {"file_path": "{p}", "content": "x"}, "ok"),
+    ("Bash", {"command": "python gen.py"}, ""),
+    ("Bash", {"command": "cd {d} && make"}, ""),
+    ("mcp__fs__do_things", {"x": 1}, "ok"),
+    ("Bash", {"command": "git checkout -- ."}, ""),
+]
+
+
+def _fill(call, disk):
+    tool, tool_input, out = call
+    sub = {k: v.replace("{p}", str(disk / "p.py")).replace("{d}", str(disk))
+           if isinstance(v, str) else v for k, v in tool_input.items()}
+    return tool, sub, out
+
+
+@pytest.mark.parametrize("later", LATER_WRITES)
+def test_disk_verified_file_is_replaced_despite_later_writes(disk, later):
+    (disk / "p.py").write_text(FILE)
+    read = ("Read", {"file_path": str(disk / "p.py")}, NUMBERED)
+    _r, compacted, d = run(convo(read, _fill(later, disk), *filler()), workspace_root=str(disk))
+    assert d["c1"]["decision"] == "replace"
+    assert d["c1"]["reason"] == "replace_disk_verified"
+    assert d["c1"]["recoverability_check"] == "disk"
+    assert text_of(compacted, "c1") == (
+        f"[removed: re-read {disk / 'p.py'} to recover; "
+        "content verified on disk at compaction time]"
+    )
+    # Without a root the transcript proxy still keeps it (v0.8 behaviour).
+    _r, _c, d = run(convo(read, _fill(later, disk), *filler()))
+    assert d["c1"]["reason"] == "file_written_later"
+
+
+@pytest.mark.parametrize("later", LATER_WRITES)
+def test_disk_mismatch_after_later_writes_is_kept(disk, later):
+    (disk / "p.py").write_text(FILE + "appended\n")
+    read = ("Read", {"file_path": str(disk / "p.py")}, NUMBERED)
+    _r, compacted, d = run(convo(read, _fill(later, disk), *filler()), workspace_root=str(disk))
+    assert d["c1"]["reason"] == "keep_disk_mismatch"
+    assert text_of(compacted, "c1") == NUMBERED
+
+
+@pytest.mark.parametrize("arrow", [False, True])
+def test_disk_verified_partial_read_compares_the_numbered_range(disk, arrow):
+    rows = NUMBERED.split("\n")[4:12]
+    if arrow:  # Claude Code's other Read format: "     5→content"
+        rows = [r.replace("\t", "→", 1) for r in rows]
+    read = ("Read", {"file_path": str(disk / "p.py"), "offset": 5, "limit": 8}, "\n".join(rows))
+    later = ("Edit", {"file_path": str(disk / "p.py"), "old_string": "x", "new_string": "y"}, "")
+    (disk / "p.py").write_text(FILE.replace("line 30 of", "line thirty of"))  # outside 5-12
+    _r, compacted, d = run(convo(read, later, *filler()), workspace_root=str(disk))
+    assert d["c1"]["reason"] == "replace_disk_verified"
+    assert "(lines 5-12)" in text_of(compacted, "c1")
+    (disk / "p.py").write_text(FILE.replace("line 9 of", "line nine of"))  # inside 5-12
+    _r, _c, d = run(convo(read, later, *filler()), workspace_root=str(disk))
+    assert d["c1"]["reason"] == "keep_disk_mismatch"
+
+
+def test_disk_check_is_byte_exact(disk):
+    (disk / "p.py").write_bytes(FILE.replace("\n", "\r\n").encode())
+    read = ("Bash", {"command": "cat p.py", "cwd": str(disk)}, FILE)
+    _r, _c, d = run(convo(read, *filler()), workspace_root=str(disk))
+    assert d["c1"]["reason"] == "keep_disk_mismatch"
+    (disk / "p.py").write_bytes(b"\xff\xfe" + FILE.encode())
+    _r, _c, d = run(convo(read, *filler()), workspace_root=str(disk))
+    assert d["c1"]["reason"] == "keep_disk_unreadable"
+
+
+def test_disk_check_caps_the_file_size(disk, monkeypatch):
+    (disk / "p.py").write_text(FILE)
+    monkeypatch.setattr(recoverable_module, "DISK_MAX_BYTES", len(FILE) - 1)
+    _r, _c, d = run(convo(("Read", {"file_path": str(disk / "p.py")}, NUMBERED), *filler()),
+                    workspace_root=str(disk))
+    assert d["c1"]["reason"] == "keep_disk_too_large"
+
+
+def test_disk_check_refuses_symlinks_out_of_the_root_and_non_files(disk, tmp_path_factory):
+    outside = tmp_path_factory.mktemp("outside") / "real.py"
+    outside.write_text(FILE)
+    (disk / "link.py").symlink_to(outside)
+    _r, _c, d = run(convo(("Read", {"file_path": str(disk / "link.py")}, NUMBERED), *filler()),
+                    workspace_root=str(disk))
+    assert d["c1"]["reason"] == "keep_disk_outside_root"
+    (disk / "real.py").write_text(FILE)
+    (disk / "inside.py").symlink_to(disk / "real.py")  # stays in the root: allowed
+    _r, _c, d = run(convo(("Read", {"file_path": str(disk / "inside.py")}, NUMBERED), *filler()),
+                    workspace_root=str(disk))
+    assert d["c1"]["reason"] == "replace_disk_verified"
+    (disk / "dir.py").mkdir()
+    _r, _c, d = run(convo(("Read", {"file_path": str(disk / "dir.py")}, NUMBERED), *filler()),
+                    workspace_root=str(disk))
+    assert d["c1"]["reason"] == "keep_disk_not_regular"
+
+
+def test_file_changed_between_check_and_emit_is_kept(disk, monkeypatch):
+    (disk / "p.py").write_text(FILE)
+    decide = transcript_module.recoverable_decisions
+
+    def decide_then_edit(*args, **kwargs):
+        decisions = decide(*args, **kwargs)
+        (disk / "p.py").write_text(FILE + "late edit\n")
+        return decisions
+
+    monkeypatch.setattr(transcript_module, "recoverable_decisions", decide_then_edit)
+    result, compacted, d = run(convo(("Read", {"file_path": str(disk / "p.py")}, NUMBERED),
+                                     *filler()), workspace_root=str(disk))
+    assert d["c1"]["decision"] == "keep"
+    assert d["c1"]["reason"] == "keep_disk_changed_before_emit"
+    assert text_of(compacted, "c1") == NUMBERED
+    assert result.report["tool_calls_replaced"] == 0
+
+
+def test_verify_accepts_the_disk_verified_pointer():
+    messages = convo(("Read", {"file_path": "/r/p.py"}, NUMBERED), *filler())
+    forged = copy.deepcopy(messages)
+    forged[2]["toolResults"][0]["text"] = (
+        "[removed: re-read /r/p.py to recover; content verified on disk at compaction time]")
+    assert verify_recoverable({"messages": messages}, forged) == []
+    forged[2]["toolResults"][0]["text"] = (
+        "[removed: re-read /r/q.py to recover; content verified on disk at compaction time]")
+    assert verify_recoverable({"messages": messages}, forged)
 
 
 def test_disk_check_missing_file_is_kept(disk):
     _r, _c, d = run(convo(("Read", {"file_path": str(disk / "gone.py")}, NUMBERED), *filler()),
                     workspace_root=str(disk))
     assert d["c1"]["decision"] == "keep"
+    assert d["c1"]["reason"] == "keep_disk_missing"
 
 
 def test_disk_check_can_be_turned_off(disk):
@@ -247,6 +379,7 @@ def test_read_only_command_is_replaced_by_a_rerun_pointer():
     ["ls -la", "find . -name '*.py'", "rg -n foo src", "grep -rn foo .", "git status",
      "git diff HEAD~1", "git log --oneline -5", "git show HEAD", "wc -l a.py", "tree src", "pwd",
      "node --version", "python3 -V", "cat a.py", "head a.py", "tail -n 5 a.py",
+     "tail --lines=5 a.py", "git diff -- a.py", "git log --oneline --stat",
      "git --version", "npm --version"],
 )
 def test_allowlisted_commands(cmd):
@@ -624,6 +757,8 @@ def test_verify_rejects_a_relative_file_pointer_without_cwd():
 @pytest.mark.parametrize(
     "cmd",
     ["tail -fn 20 log", "tail -qf log", "tail -F log", "tail -nf 5 log", "tail --follow=name log",
+     "tail --fo log", "tail --foll=name log", "tail --f log", "tail --re log", "tail --r log",
+     "git diff --out=x", "git log --outp x", "git diff --ext HEAD", "git show --ext-d HEAD",
      "cat -", "cat", "head -n 5 -", "wc -l", "cat /dev/urandom", "head -c 10 /dev/random",
      "cat /proc/self/status", "nl -"],
 )

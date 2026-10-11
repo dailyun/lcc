@@ -10,10 +10,19 @@ tool result with a recovery pointer:
   ``sed -n 'a,bp'`` of a single file — when no later call writes, patches, deletes or even
   names that file (any call that is not a pure read whose input names it counts as a possible
   write; so do worktree-changing git commands from any tool, and ``rm``/``mv``-like commands
-  naming a parent directory). With a workspace root and ``disk_check`` on, the file on
-  disk must currently hold exactly the removed content (or line range); otherwise it is kept.
-  Without a root the transcript proxy alone decides (``recoverability_check``
-  ``transcript_proxy``).
+  naming a parent directory). Without a workspace root the transcript proxy alone decides
+  (``recoverability_check`` ``transcript_proxy``).
+- Disk-authoritative (owner decision 2026-10-11): with a workspace root and ``disk_check`` on,
+  the disk decides a file pointer instead of the transcript proxy. The file is replaced iff it
+  exists, resolves (symlinks followed) inside the workspace root or its own directory, is a
+  regular file of at most :data:`DISK_MAX_BYTES`, decodes as UTF-8 and its bytes hold exactly
+  the removed output (whole file, or the read's line range; ``Read`` line-number prefixes
+  ``N\t``/``N→`` stripped, a Codex exec header dropped, no other normalisation). Later writes,
+  opaque or not, do not matter then: what the agent re-reads is what was removed. The pointer
+  says ``content verified on disk at compaction time``; reasons are ``replace_disk_verified``
+  or ``keep_disk_mismatch`` / ``_missing`` / ``_not_regular`` / ``_outside_root`` /
+  ``_too_large`` / ``_unreadable``, and ``keep_disk_changed_before_emit`` when the file's hash
+  changed between the check and the emit (see :func:`disk_unchanged`).
 - ``[removed: re-run `<cmd>` to recover]`` for a command on :func:`is_read_only_command`'s
   allowlist (``ls``, ``find``, ``rg``/``grep``, read-only ``git status|diff|log|show``,
   ``cat``-likes, ``wc``, ``tree``, ``pwd``, ``--version`` of a known tool) when nothing later
@@ -47,10 +56,12 @@ or command the goal or a recent user turn names. Text and tool inputs never chan
 
 from __future__ import annotations
 
+import hashlib
+import os
 import posixpath
 import re
 import shlex
-from pathlib import Path
+import stat
 from typing import Any
 
 from lcc.relevance.transcript_lossless import (
@@ -108,6 +119,10 @@ _SPECIAL = re.compile(r"^(?:/private)?/(?:dev|proc|sys)(?:/|$)")
 _GLOB = re.compile(r"[*?\[\]{}]")
 #: An opaque call that changes directory may write outside its own cwd.
 _CHDIR = re.compile(r"\b(?:cd|pushd)\b|(?:^|\s)-C\b|--(?:prefix|cwd|directory)\b")
+#: Disk check: a larger file is never read for a pointer; its read is kept. The removed
+#: output sits in a context window, so a real candidate is far smaller than this.
+DISK_MAX_BYTES = 4 * 1024 * 1024
+_VERIFIED = "; content verified on disk at compaction time"
 #: Programs that read stdin when given no file operand.
 _STDIN_PROGS = {"cat", "head", "tail", "nl", "wc"}
 
@@ -156,6 +171,12 @@ def _operands(args: list[str]) -> list[str]:
     return out
 
 
+def _long_opt(arg: str, *names: str) -> bool:
+    """``arg`` is a long option getopt may expand to one of ``names`` (``--fo`` -> ``--follow``)."""
+    name = arg[2:].split("=", 1)[0] if arg.startswith("--") else ""
+    return bool(name) and any(n.startswith(name) for n in names)
+
+
 def is_read_only_command(cmd: str) -> bool:
     """``cmd`` is on the read-only allowlist: re-running it changes nothing."""
     argv = _argv(cmd)
@@ -187,7 +208,7 @@ def is_read_only_command(cmd: str) -> bool:
     if prog == "tail":
         # -f/-F anywhere in a short-flag group (-fn, -qf, -nf) or --follow/--retry follows.
         return not any(
-            a.startswith(("--follow", "--retry"))
+            a.startswith(("--follow", "--retry")) or _long_opt(a, "follow", "retry")
             or (a.startswith("-") and not a.startswith("--") and ("f" in a or "F" in a))
             for a in args
         )
@@ -199,7 +220,8 @@ def is_read_only_command(cmd: str) -> bool:
         return _sed_range(args) is not None
     if prog == "git":
         return bool(args) and args[0] in _GIT_READ and not any(
-            a.startswith(("--output", "--ext-diff")) for a in args
+            a.startswith(("--output", "--ext-diff")) or _long_opt(a, "output", "ext-diff")
+            for a in args
         )
     return False
 
@@ -319,15 +341,8 @@ def _pointer_lines(call: Any, body: str, spec: str) -> tuple[int, int] | None | 
     return a, b
 
 
-def _disk_matches(call: Any, path: str, spec: str, body: str, root: Path) -> bool:
-    """The file on disk currently holds exactly ``body`` (whole file or the read range)."""
-    workdir = call.input.get("workdir") or call.input.get("cwd")
-    base = Path(workdir) if isinstance(workdir, str) and Path(workdir).is_absolute() else root
-    target = Path(path) if Path(path).is_absolute() else base / path
-    try:
-        disk = _file_lines(target.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError):
-        return False
+def _lines_match(call: Any, spec: str, body: str, disk: list[str]) -> bool:
+    """``body`` is exactly the file's ``disk`` lines (whole file or the read range)."""
     if call.tool in FILE_READ_TOOLS and (rows := _numbered(body)) is not None:
         if spec == "all" and (rows[0][0] != 1 or rows[-1][0] != len(disk)):
             return False
@@ -340,6 +355,50 @@ def _disk_matches(call: Any, path: str, spec: str, body: str, root: Path) -> boo
         return got == disk[-count:] if count else got == []
     a, b = (int(x) for x in spec.split("-"))
     return got == disk[a - 1 : b]
+
+
+def _disk_read(target: str, root: str) -> tuple[str, bytes | None, str]:
+    """(state, file bytes, real path): state ``ok`` or the ``keep_disk_*`` reason."""
+    real = os.path.realpath(target)
+    homes = (os.path.realpath(root), os.path.realpath(posixpath.dirname(target)))
+    if not any(_under(real, home) for home in homes if home != "/"):
+        return "keep_disk_outside_root", None, real
+    try:
+        info = os.stat(real)
+        if not stat.S_ISREG(info.st_mode):
+            return "keep_disk_not_regular", None, real
+        if info.st_size > DISK_MAX_BYTES:
+            return "keep_disk_too_large", None, real
+        with open(real, "rb") as handle:
+            data = handle.read(DISK_MAX_BYTES + 1)
+    except FileNotFoundError:
+        return "keep_disk_missing", None, real
+    except OSError:
+        return "keep_disk_unreadable", None, real
+    return ("keep_disk_too_large", None, real) if len(data) > DISK_MAX_BYTES else ("ok", data, real)
+
+
+def _disk_check(
+    call: Any, target: str, spec: str, body: str, root: str
+) -> tuple[str, dict[str, str] | None]:
+    """(``ok`` or a ``keep_disk_*`` reason, {path, real, sha256} to re-hash before emitting)."""
+    state, data, real = _disk_read(target, root)
+    if data is None:
+        return state, None
+    try:
+        text = data.decode("utf-8")  # strict, no newline translation: CRLF never matches LF
+    except UnicodeDecodeError:
+        return "keep_disk_unreadable", None
+    if not _lines_match(call, spec, body, _file_lines(text)):
+        return "keep_disk_mismatch", None
+    return "ok", {"path": target, "real": real, "sha256": hashlib.sha256(data).hexdigest()}
+
+
+def disk_unchanged(disk: dict[str, str], root: str) -> bool:
+    """The file a disk-verified pointer names still resolves and hashes as at the check."""
+    state, data, real = _disk_read(disk["path"], root)
+    return (state == "ok" and real == disk["real"] and data is not None
+            and hashlib.sha256(data).hexdigest() == disk["sha256"])
 
 
 def _command_named(cmd: str, text: str) -> bool:
@@ -389,10 +448,12 @@ def _opaque_dir(call: Any, text: str) -> str | None:
     return posixpath.normpath(cwd)
 
 
-def _file_pointer(path: str, lines: tuple[int, int] | None, cwd: str | None = None) -> str:
+def _file_pointer(
+    path: str, lines: tuple[int, int] | None, cwd: str | None = None, verified: bool = False
+) -> str:
     span = f" (lines {lines[0]}-{lines[1]})" if lines else ""
     where = f" (cwd {cwd})" if cwd else ""
-    return f"[removed: re-read {path}{span}{where} to recover]"
+    return f"[removed: re-read {path}{span}{where} to recover{_VERIFIED if verified else ''}]"
 
 
 def _command_pointer(cmd: str, cwd: str | None = None) -> str:
@@ -477,7 +538,6 @@ def recoverable_decisions(
     use_disk = bool(root) and disk_check
     # A call outside the pinned tail can still have its result inside it.
     pinned = {m.message_index for m in messages if m.pinned}
-    root_path = Path(root) if root else None
 
     replaced: dict[str, dict[str, Any]] = {}
     reasons: dict[str, str] = {}
@@ -525,7 +585,11 @@ def recoverable_decisions(
         if reason is None and read is not None:
             path, spec = read
             lines = _pointer_lines(call, body, spec)
-            if file_written(path, call):
+            # Disk-authoritative: for a file pointer the disk check below replaces the proxy.
+            disk_decides = use_disk and lines != "skip"
+            target = _resolved(path, cwd)
+            disk: dict[str, str] | None = None
+            if not disk_decides and file_written(path, call):
                 reason = "file_written_later"
             elif spec == "empty":
                 reason = "read_range_empty"
@@ -535,25 +599,30 @@ def recoverable_decisions(
                 reason = "command_output_changed_later"
             elif lines == "skip" and not allow_command_pointers:
                 reason = "command_pointers_disabled"
-            elif lines != "skip" and _resolved(path, cwd) is None:
-                reason = "relative_path_without_cwd"
-            elif use_disk and not _disk_matches(call, path, spec, body, root_path):  # type: ignore[arg-type]
-                reason = "disk_content_differs"
+            elif target is None and (lines != "skip" or use_disk):
+                reason = "relative_path_without_cwd"  # with the disk on: no file to check
+            elif use_disk and (
+                state := _disk_check(call, target, spec, body, root)  # type: ignore[arg-type]
+            )[0] != "ok":
+                reason = state[0]
             else:
+                disk = state[1] if use_disk else None
                 # A tail range needs the file length: point at the command itself instead.
                 note, recover = (
                     (_command_pointer(cmd, cwd), {"kind": "command", "command": cmd, "cwd": cwd})
                     if lines == "skip" and cmd is not None
-                    else (_file_pointer(path, lines, cwd), {  # type: ignore[arg-type]
+                    else (_file_pointer(path, lines, cwd, disk_decides), {  # type: ignore[arg-type]
                         "kind": "file", "path": path, "cwd": cwd,
                         "lines": list(lines) if isinstance(lines, tuple) else None})
                 )
                 hit = {
-                    "reason": "recoverable_file_read",
+                    "reason": "replace_disk_verified" if disk_decides else "recoverable_file_read",
                     "note": note,
                     "recover": recover,
                     "recoverability_check": "disk" if use_disk else "transcript_proxy",
                 }
+                if disk_decides:
+                    hit["disk"] = disk
         elif reason is None and cmd is not None and is_read_only_command(cmd):
             if command_changed(cmd, call):
                 reason = "command_output_changed_later"
@@ -599,7 +668,8 @@ def _valid_pointers(call: Any, original: str, allow_command_pointers: bool) -> s
     if read is not None:
         lines = _pointer_lines(call, _body(original)[0], read[1])
         if lines != "skip" and _resolved(read[0], _cwd(call)) is not None:
-            pointers.add(_file_pointer(read[0], lines, _cwd(call)))  # type: ignore[arg-type]
+            for verified in (False, True):
+                pointers.add(_file_pointer(read[0], lines, _cwd(call), verified))  # type: ignore[arg-type]
     return pointers
 
 

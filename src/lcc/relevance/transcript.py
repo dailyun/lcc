@@ -36,7 +36,11 @@ from typing import Any
 
 from lcc.relevance.jev import JEV_CONTEXT_LIMIT_TOKENS, JevClient, jev_tokens, parse_noul_answer
 from lcc.relevance.transcript_lossless import lossless_decisions, verify_lossless
-from lcc.relevance.transcript_recoverable import recoverable_decisions, verify_recoverable
+from lcc.relevance.transcript_recoverable import (
+    disk_unchanged,
+    recoverable_decisions,
+    verify_recoverable,
+)
 from lcc.relevance.transcript_rules import rules_decisions
 from lcc.token_budget import count_tokens
 
@@ -157,7 +161,8 @@ class TranscriptCompactionRequest:
     client: Any = None
     rules_mode: str = "lossless"
     #: ``recoverable`` only: the workspace the transcript's paths resolve against. When set
-    #: (and ``disk_check`` is on) a file read is replaced only if the file still holds it.
+    #: (and ``disk_check`` is on) the disk decides file pointers: replaced iff the file still
+    #: holds exactly the removed content, even after later writes (disk-authoritative).
     workspace_root: str | None = None
     disk_check: bool = True
     #: ``recoverable`` only: also allow re-run command pointers (off since the v0.7 review).
@@ -1042,6 +1047,22 @@ def compact_transcript(request: TranscriptCompactionRequest) -> TranscriptCompac
                 for d in decisions
             ]
             rebuilt = list(messages)
+    if use_disk and any(
+        d["decision"] == "replace" and "disk" in d
+        and not disk_unchanged(d["disk"], request.workspace_root)  # type: ignore[arg-type]
+        for d in decisions
+    ):
+        # Re-hash right before emitting: a file that changed since its check is kept. Turning
+        # a replace into a keep only restores original bytes, so the verified output stays valid.
+        decisions = [
+            dict(d, decision="keep", reason="keep_disk_changed_before_emit",
+                 chars_after=d["chars"])
+            if d["decision"] == "replace" and "disk" in d
+            and not disk_unchanged(d["disk"], request.workspace_root)  # type: ignore[arg-type]
+            else d
+            for d in decisions
+        ]
+        rebuilt = _apply(messages, decisions, trim_head_chars=request.trim_head_chars)
 
     after_text = _text_of(rebuilt)
     before_count = count_tokens(before_text, request.model)

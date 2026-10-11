@@ -116,11 +116,36 @@ recover]`` (a command on the read-only allowlist: `ls`, `find` without `-exec/-d
 `-o`, `pwd`, `<tool> --version`; no pipes, redirects, substitutions or env prefixes). Never
 replaced: other commands, MCP/web tools, edit results, failed results, the latest error and the
 call before it, the last `preserve_recent` turns, calls named in the goal or recent user turns.
-With `workspace_root` (MCP) and `disk_check` on (default) a file read is replaced only if the
-file on disk still holds the removed text; without a root the report says
-`recoverability_check: transcript_proxy`. Decisions are `replace` (with `note` and `recover`),
-`dedupe` or `keep`; `verify_recoverable` checks texts/inputs are unchanged and each pointer names
-its own call's path or allowlisted command. Not yet benchmarked or audited.
+Decisions are `replace` (with `note` and `recover`), `dedupe` or `keep`; `verify_recoverable`
+checks texts/inputs are unchanged and each pointer names its own call's path or allowlisted
+command. Command pointers are off unless `allow_command_pointers`.
+
+The file-pointer check has two forms (`recoverability_check` in the report):
+
+- `transcript_proxy` (no `workspace_root`): a read is replaced only when no later call can have
+  written the file — no write, patch or delete naming it, no worktree-wide git command, no
+  opaque call (script, build, test run, unknown tool) that may write under its directory.
+  Benched offline as v0.8 (LCC 4c39161): 0/0/0 verification on 847 items, pooled reduction
+  0.0123; most removed pointers (1862 of 1978) are blocked by `file_written_later`.
+- `disk` (`workspace_root` set and `disk_check` on, the default): the disk decides instead.
+  A file read is replaced iff the file currently exists, resolves (symlinks followed) inside
+  the workspace root or its own directory, is a regular file of at most 4 MiB
+  (`DISK_MAX_BYTES`), decodes as UTF-8, and its bytes hold exactly the removed output — the
+  whole file, or the read's line range. The only normalisation is the one the read tool
+  applied: `Read`'s `N\t`/`N→` line-number prefixes and a Codex exec header are stripped;
+  CRLF never matches LF. Later writes, opaque or not, then do not matter: what the agent
+  re-reads is what was removed. The pointer says so:
+  `[removed: re-read <path> to recover; content verified on disk at compaction time]`.
+  Reasons: `replace_disk_verified`, or `keep_disk_mismatch`, `keep_disk_missing`,
+  `keep_disk_not_regular`, `keep_disk_outside_root`, `keep_disk_too_large`,
+  `keep_disk_unreadable`. Right before emitting, every disk-verified file is re-hashed; one that
+  changed since its check is kept (`keep_disk_changed_before_emit`). Offline benches cannot
+  measure this form: the historical files have changed since the transcripts were recorded, so
+  real-use numbers come from the opt-in request log.
+
+Recommended config for live sessions: `provider: rules`, `rules_mode: recoverable`,
+`workspace_root` = the session's cwd (the Claude Code hook sends it), command pointers off.
+`lossless` stays the default `rules_mode`: it needs no disk and makes no recovery claim.
 
 **`lossy` (EXPERIMENTAL)** — failed two session-disjoint blind audits (bench v0.4: 21/150
 decisions flagged; v0.5: 36/132), because its trims and drops remove output an agent may still

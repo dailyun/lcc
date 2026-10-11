@@ -282,9 +282,10 @@ TOOLS: dict[str, dict[str, Any]] = {
                 "workspace_root": {
                     "type": "string",
                     "description": (
-                        "rules_mode 'recoverable' only: the directory transcript paths "
-                        "resolve against. When set, a file read is replaced only if the file "
-                        "on disk still holds the removed content."
+                        "rules_mode 'recoverable' only: the session's working directory. "
+                        "When set (and disk_check on), the disk decides file pointers: a "
+                        "read is replaced iff the file inside it (or its own directory) "
+                        "currently holds exactly the removed content, even after later writes."
                     ),
                 },
                 "disk_check": {"type": "boolean", "default": True},

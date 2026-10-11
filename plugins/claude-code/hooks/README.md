@@ -54,7 +54,9 @@ plugin's config (`/plugin` → lcc, or `claude plugin install --config key=value
 
 `rulesMode` (with `provider: rules`) picks `lossless`, `recoverable` or `lossy`; empty keeps the
 server default. With `recoverable` the hook sends the session's working directory as
-`workspace_root`, so every removed file read is checked against the file on disk.
+`workspace_root`, so every removed file read is checked against the file on disk. The
+directory is the event's `cwd` field when it is an absolute path, else the hook process's
+`process.cwd()` (function hooks run inside the session's process).
 
 ## Fallback is the default when anything is off
 

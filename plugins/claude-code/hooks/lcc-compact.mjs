@@ -30,6 +30,15 @@ function message(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * The session's working directory, which becomes `workspace_root` for rules_mode recoverable.
+ * Preferred: `event.cwd`, the absolute cwd Claude Code puts on every hook event. Fallback:
+ * `process.cwd()`, because function hooks run inside the session's own process.
+ */
+export function sessionCwd(event) {
+  return typeof event?.cwd === "string" && event.cwd.startsWith("/") ? event.cwd : process.cwd();
+}
+
 /** @type {import('claude-code').Register} */
 export const register = (on, options) => {
   const configured = resolveOptions(options);
@@ -47,8 +56,7 @@ export const register = (on, options) => {
       messages: event.messages ?? [],
       instructions: event.instructions,
       options: configured,
-      // ponytail: the hook runs in the session's process; event.cwd if the engine ever sends it.
-      cwd: event.cwd ?? process.cwd(),
+      cwd: sessionCwd(event),
     });
     if (!args) return next(event);
 

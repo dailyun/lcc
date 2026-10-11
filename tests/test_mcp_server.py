@@ -464,4 +464,8 @@ def test_compact_transcript_accepts_rules_mode_recoverable_with_a_workspace(
     assert payload["report"]["recoverability_check"] == "disk"
     decisions = {d["id"]: d for d in payload["decisions"]}
     assert decisions["a"]["decision"] == "replace"
-    assert decisions["a"]["note"] == f"[removed: re-read {tmp_path / 'x.py'} to recover]"
+    assert decisions["a"]["reason"] == "replace_disk_verified"
+    assert decisions["a"]["note"] == (
+        f"[removed: re-read {tmp_path / 'x.py'} to recover; "
+        "content verified on disk at compaction time]"
+    )
