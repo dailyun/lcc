@@ -78,7 +78,8 @@ def text_of(payload: list[dict], call_id: str) -> str:
 
 
 def filler(n: int = 1):
-    return [("Bash", {"command": "pytest -q"}, f"{n} passed")]
+    # A call that writes nothing: it must not invalidate earlier pointers.
+    return [("Grep", {"pattern": f"todo{n}"}, f"{n} matches")]
 
 
 # -- file reads -----------------------------------------------------------------------
@@ -125,7 +126,7 @@ def test_codex_exec_read_is_a_file_read():
         convo(("exec_command", {"cmd": "sed -n '1,39p' p.py", "workdir": "/r"}, out), *filler())
     )
     assert d["c1"]["decision"] == "replace"
-    assert text_of(compacted, "c1") == "[removed: re-read p.py (lines 1-39) to recover]"
+    assert text_of(compacted, "c1") == "[removed: re-read p.py (lines 1-39) (cwd /r) to recover]"
 
 
 def test_codex_exec_read_with_nonzero_exit_is_kept():
@@ -231,7 +232,8 @@ def test_read_only_command_is_replaced_by_a_rerun_pointer():
     "cmd",
     ["ls -la", "find . -name '*.py'", "rg -n foo src", "grep -rn foo .", "git status",
      "git diff HEAD~1", "git log --oneline -5", "git show HEAD", "wc -l a.py", "tree src", "pwd",
-     "node --version", "python3 -V", "cat a.py", "head a.py", "tail -n 5 a.py"],
+     "node --version", "python3 -V", "cat a.py", "head a.py", "tail -n 5 a.py",
+     "git --version", "npm --version"],
 )
 def test_allowlisted_commands(cmd):
     assert is_read_only_command(cmd)
@@ -245,7 +247,13 @@ def test_allowlisted_commands(cmd):
      "ls && rm a.py", "echo $(rm a)", "FOO=1 ls", "env ls", "find . -delete",
      "find . -exec rm {} ;", "tail -f log", "rg --pre sh foo", "git -c core.pager=x log",
      "ls `rm a`", "make --version extra", "tree -o out.txt src", "tree src -o out.txt",
-     "git log --output=x", "git branch -D x", "sed -n 1,5p a.py b.py"],
+     "git log --output=x", "git branch -D x", "sed -n 1,5p a.py b.py",
+     # M1: no generic version query; scripts and task runners are never read-only.
+     "make --version", "yarn --version", "make -V", "foo version", "./x --version",
+     "./node --version", "bin/node --version", "./x", "npm -V", "npm version",
+     # tree writes with -o anywhere, combined short flags included; -R with -H writes too.
+     "tree -ao out.txt src", "tree --output=x src", "tree -R -H . src",
+     "sort -o x a.py", "find . -fls x", "tee x", "sed -n '12,5p' a.py"],
 )
 def test_non_read_only_commands(cmd):
     assert not is_read_only_command(cmd)
@@ -323,3 +331,137 @@ def test_verify_rejects_changed_text_or_inputs():
     forged = copy.deepcopy(messages)
     forged[1]["toolUses"][0]["input"] = {"command": "ls"}
     assert verify_recoverable({"messages": messages}, forged)
+
+
+# -- v0.6 review: H1 shell tools -------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "later",
+    [
+        ("terminal", {"command": "git checkout -- ."}, ""),
+        ("terminal", {"command": "git restore ."}, ""),
+        ("terminal", {"command": "git stash"}, ""),
+        ("terminal", {"command": "rm -rf src"}, ""),
+        ("Bash", {"command": "mv src old_src"}, ""),
+        ("execute_code", {"code": "import subprocess; subprocess.run('git checkout .')"}, ""),
+    ],
+)
+def test_hermes_terminal_and_dir_level_writes_invalidate_file_pointers(later):
+    _r, compacted, d = run(convo(("Read", {"file_path": "src/p.py"}, NUMBERED), later, *filler()))
+    assert d["c1"]["decision"] == "keep"
+    assert d["c1"]["reason"] == "file_written_later"
+
+
+def test_hermes_terminal_read_is_a_shell_read():
+    _r, compacted, d = run(convo(("terminal", {"command": "cat src/p.py"}, FILE), *filler()))
+    assert d["c1"]["reason"] == "recoverable_file_read"
+    assert text_of(compacted, "c1") == "[removed: re-read src/p.py to recover]"
+
+
+def test_background_terminal_output_is_not_command_output():
+    _r, _c, d = run(convo(("terminal", {"command": "ls src", "background": True}, LISTING),
+                          *filler()))
+    assert d["c1"]["decision"] == "keep"
+
+
+# -- H2 command pointers ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "cmd,later",
+    [
+        ("git status", ("Bash", {"command": "git commit -m x"}, "")),
+        ("git status", ("Bash", {"command": "git add -A"}, "")),
+        ("git diff", ("Edit", {"file_path": "x.py", "old_string": "a", "new_string": "b"}, "ok")),
+        ("git log --oneline -5", ("terminal", {"command": "git pull"}, "")),
+        ("git show HEAD", ("apply_patch", {"input": "*** Update File: y.py"}, "ok")),
+        ("ls src", ("Write", {"file_path": "src/new.py", "content": "x"}, "ok")),
+        ("ls", ("Write", {"file_path": "elsewhere/new.py", "content": "x"}, "ok")),
+        ("find . -name '*.py'", ("Write", {"file_path": "a.py", "content": "x"}, "ok")),
+        ("rg -n foo src", ("patch", {"path": "src/b.py", "old_string": "a", "new_string": "b"},
+                           "ok")),
+        ("wc -l src/a.py", ("Bash", {"command": "pytest -q"}, "1 passed")),
+        ("ls src", ("Bash", {"command": "python gen.py"}, "")),
+        ("tail -n 5 src/p.py", ("Bash", {"command": "make"}, "")),
+    ],
+)
+def test_command_output_changed_later_is_kept(cmd, later):
+    _r, compacted, d = run(convo(("Bash", {"command": cmd}, LISTING), later, *filler()))
+    assert d["c1"]["decision"] == "keep"
+    assert d["c1"]["reason"] == "command_output_changed_later"
+    assert text_of(compacted, "c1") == LISTING
+
+
+@pytest.mark.parametrize(
+    "cmd,later",
+    [
+        ("git status", ("Read", {"file_path": "a.py"}, "x")),
+        ("ls src", ("Write", {"file_path": "docs/new.md", "content": "x"}, "ok")),
+        ("ls src", ("Bash", {"command": "rg -n foo"}, "x")),
+        ("pwd", ("Write", {"file_path": "a.py", "content": "x"}, "ok")),
+    ],
+)
+def test_command_output_untouched_later_is_replaced(cmd, later):
+    _r, _c, d = run(convo(("Bash", {"command": cmd}, LISTING), later, *filler()))
+    assert d["c1"]["decision"] == "replace"
+
+
+# -- M2 cwd in pointers ----------------------------------------------------------------
+
+
+def test_pointers_name_the_working_directory():
+    _r, compacted, _d = run(convo(
+        ("terminal", {"command": "ls src", "workdir": "/repo"}, LISTING),
+        ("Read", {"file_path": "p.py", "cwd": "/repo"}, NUMBERED),
+        *filler()))
+    assert text_of(compacted, "c1") == "[removed: re-run `ls src` in /repo to recover]"
+    assert text_of(compacted, "c2") == "[removed: re-read p.py (cwd /repo) to recover]"
+
+
+# -- L1 / L2 verifier and ranges -------------------------------------------------------
+
+
+def test_verify_rejects_wrong_line_range_or_missing_cwd():
+    messages = convo(("Read", {"file_path": "a.py"}, NUMBERED), *filler())
+    forged = copy.deepcopy(messages)
+    forged[2]["toolResults"][0]["text"] = "[removed: re-read a.py (lines 1-3) to recover]"
+    assert verify_recoverable({"messages": messages}, forged)
+    part = "\n".join(NUMBERED.split("\n")[4:12])
+    messages = convo(("Read", {"file_path": "a.py", "offset": 5, "limit": 8}, part), *filler())
+    forged = copy.deepcopy(messages)
+    forged[2]["toolResults"][0]["text"] = "[removed: re-read a.py to recover]"
+    assert verify_recoverable({"messages": messages}, forged)
+    messages = convo(("Bash", {"command": "ls src", "cwd": "/r"}, LISTING), *filler())
+    forged = copy.deepcopy(messages)
+    forged[2]["toolResults"][0]["text"] = "[removed: re-run `ls src` to recover]"
+    assert verify_recoverable({"messages": messages}, forged)
+
+
+@pytest.mark.parametrize("cmd", ["head -n 0 src/p.py", "head -0 src/p.py", "sed -n '12,5p' src/p.py"])
+def test_empty_or_reversed_ranges_are_kept(cmd):
+    result, compacted, d = run(convo(("Bash", {"command": cmd}, FILE), *filler()))
+    assert d["c1"]["decision"] == "keep"
+    assert not result.report["degraded"]
+    assert text_of(compacted, "c1") == FILE
+
+
+# -- FS duplicate tool_use_ids ---------------------------------------------------------
+
+
+def test_duplicate_tool_use_ids_are_kept_without_tripping_the_fail_safe():
+    messages = convo(("Bash", {"command": "ls src"}, LISTING),
+                     ("Bash", {"command": "ls lib"}, LISTING + "\nlib"),
+                     ("Read", {"file_path": "q.py"}, NUMBERED),
+                     *filler())
+    for message in messages[3:5]:  # second call reuses c1's id
+        for block in message.get("toolUses", []) + message.get("toolResults", []):
+            block["id"] = "c1"
+    result, compacted, _d = run(messages)
+    assert not result.report["degraded"], result.report["degradation_reason"]
+    assert result.report["lossless_violations"] == []
+    reasons = [x["reason"] for x in result.decisions if x["id"] == "c1"]
+    assert reasons == ["duplicate_tool_use_id", "duplicate_tool_use_id"]
+    assert [i["text"] for m in compacted for i in m.get("toolResults", [])][:2] == [
+        LISTING, LISTING + "\nlib"]
+    assert text_of(compacted, "c3") == "[removed: re-read q.py to recover]"

@@ -77,6 +77,20 @@ def _flat_results(messages: list[Any]) -> list[Any]:
     return [result for message in messages for result in message.tool_results]
 
 
+def duplicate_ids(messages: list[Any]) -> set[str]:
+    """Ids carried by more than one call or more than one result: pairing them is ambiguous,
+    so no policy replaces them or points at them."""
+    seen_calls: set[str] = set()
+    seen_results: set[str] = set()
+    dupes: set[str] = set()
+    for message in messages:
+        for call in message.tool_calls:
+            (dupes if call.id in seen_calls else seen_calls).add(call.id)
+        for result in message.tool_results:
+            (dupes if result.id in seen_results else seen_results).add(result.id)
+    return dupes
+
+
 def lossless_decisions(
     messages: list[Any], candidates: list[Any], *, unavailable: set[str] | None = None
 ) -> list[dict[str, Any]]:
@@ -85,7 +99,8 @@ def lossless_decisions(
     ``unavailable`` names results another policy replaces: they are never pointer targets
     (and are not deduped here either).
     """
-    unavailable = unavailable or set()
+    duplicated = duplicate_ids(messages)
+    unavailable = (unavailable or set()) | duplicated
     candidate_ids = {
         call.result.id for call in candidates
         if call.result is not None and call.result.id not in unavailable
@@ -131,7 +146,9 @@ def lossless_decisions(
             "tool": call.tool,
         }
         hit = found.get(call.result.id) if call.result is not None else None
-        if hit is None:
+        if call.id in duplicated:
+            decisions.append(base | {"decision": "keep", "reason": "duplicate_tool_use_id"})
+        elif hit is None:
             decisions.append(base | {"decision": "keep", "reason": "no_lossless_superseder"})
         else:
             kept_at, note, reason = hit

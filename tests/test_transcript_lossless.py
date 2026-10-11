@@ -276,3 +276,17 @@ def test_empty_messages_do_not_trip_the_verifier():
     assert d["c1"]["decision"] == "dedupe"
     assert result.report["lossless_violations"] == []
     assert result.report["degraded"] is False
+
+
+def test_duplicate_tool_use_ids_are_kept_without_tripping_the_fail_safe():
+    messages = convo(("Bash", {"command": "pytest"}, BODY), ("Bash", {"command": "pytest"}, BODY),
+                     ("Bash", {"command": "ls"}, "a.py"))
+    for message in messages[3:5]:  # the second call reuses c1's id
+        for block in message.get("toolUses", []) + message.get("toolResults", []):
+            block["id"] = "c1"
+    result, compacted, _d = run(messages)
+    assert not result.report["degraded"], result.report["degradation_reason"]
+    assert [x["reason"] for x in result.decisions if x["id"] == "c1"] == [
+        "duplicate_tool_use_id", "duplicate_tool_use_id"]
+    assert [i["text"] for m in compacted for i in m.get("toolResults", [])][:2] == [BODY, BODY]
+    assert verify_lossless({"messages": messages}, compacted) == []
