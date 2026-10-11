@@ -86,11 +86,27 @@ test("toMcpMessages carries the fields the MCP tool reads", () => {
   assert.deepEqual(messages[2].toolResults, [{ tool_use_id: "toolu_1", text: "1 failed, 24 passed" }]);
 });
 
+test("toMcpMessages forwards a result's error flag, and only when set", () => {
+  const messages = toMcpMessages([
+    { role: "user", text: "", toolResults: [
+      { tool_use_id: "a", text: "boom", is_error: true },
+      { tool_use_id: "b", text: "fine", isError: true },
+      { tool_use_id: "c", text: "ok", is_error: false },
+    ] },
+  ]);
+  assert.deepEqual(messages[0].toolResults, [
+    { tool_use_id: "a", text: "boom", is_error: true },
+    { tool_use_id: "b", text: "fine", is_error: true },
+    { tool_use_id: "c", text: "ok" },
+  ]);
+});
+
 test("the judge is configurable and defaults to jev", () => {
   // The local judge is opt-in; an unknown value must not reach the MCP tool.
   assert.equal(resolveOptions({}).provider, "jev");
   assert.equal(resolveOptions({ provider: "laya" }).provider, "laya");
   assert.equal(resolveOptions({ provider: "auto" }).provider, "auto");
+  assert.equal(resolveOptions({ provider: "rules" }).provider, "rules");
   assert.equal(resolveOptions({ provider: "nonsense" }).provider, "jev");
 
   const args = buildCompactArgs({
@@ -121,6 +137,28 @@ test("buildCompactArgs prefers an explicit question, then the /compact instructi
   assert.equal(buildCompactArgs({ messages: [{ role: "assistant", text: "hi" }], options: {} }), null);
 });
 
+test("buildCompactArgs sends no rules_mode unless the user opts in", () => {
+  const args = buildCompactArgs({ messages: TRANSCRIPT, options: {}, cwd: "/repo" });
+  assert.equal("rules_mode" in args, false);
+  assert.equal("workspace_root" in args, false);
+  const lossless = buildCompactArgs({ messages: TRANSCRIPT, options: { provider: "rules", rulesMode: "lossless" }, cwd: "/repo" });
+  assert.equal(lossless.rules_mode, "lossless");
+  assert.equal("workspace_root" in lossless, false);
+  const bogus = buildCompactArgs({ messages: TRANSCRIPT, options: { rulesMode: "yolo" }, cwd: "/repo" });
+  assert.equal("rules_mode" in bogus, false);
+});
+
+test("buildCompactArgs passes the session cwd as workspace_root for rules_mode recoverable", () => {
+  const options = { provider: "rules", rulesMode: "recoverable" };
+  const args = buildCompactArgs({ messages: TRANSCRIPT, options, cwd: "/repo" });
+  assert.equal(args.provider, "rules");
+  assert.equal(args.rules_mode, "recoverable");
+  assert.equal(args.workspace_root, "/repo");
+  // No absolute cwd: no workspace_root (the server then falls back to the transcript proxy).
+  assert.equal("workspace_root" in buildCompactArgs({ messages: TRANSCRIPT, options, cwd: "rel" }), false);
+  assert.equal("workspace_root" in buildCompactArgs({ messages: TRANSCRIPT, options }), false);
+});
+
 test("parseToolResult reads the JSON out of the MCP content blocks", () => {
   const payload = { messages: [{ role: "user", text: "hi" }], report: { mode: "tool-calls" } };
   const parsed = parseToolResult([{ type: "text", text: JSON.stringify(payload) }]);
@@ -134,7 +172,21 @@ test("decideReplacement replaces only a judged pass that removed something", () 
   const messages = [{ role: "user", text: "hi" }];
   assert.deepEqual(
     decideReplacement({ report: { degraded: false, reduction_ratio: 0.42, tool_calls_dropped: 3 }, messages, minReductionRatio: 0.25 }),
-    { replace: true, reason: "kept 1 messages, dropped 3 tool call(s), trimmed 0" },
+    { replace: true, reason: "kept 1 messages, dropped 3 tool call(s), trimmed 0, deduped 0, replaced 0" },
+  );
+  // Lossless dedupes and recoverable replacements count as removals.
+  assert.deepEqual(
+    decideReplacement({
+      report: { degraded: false, reduction_ratio: 0.4, tool_calls_deduped: 2, tool_calls_replaced: 5 },
+      messages,
+      minReductionRatio: 0.25,
+    }),
+    { replace: true, reason: "kept 1 messages, dropped 0 tool call(s), trimmed 0, deduped 2, replaced 5" },
+  );
+  // A ratio with nothing removed (e.g. only whitespace changed) is not a compaction.
+  assert.equal(
+    decideReplacement({ report: { degraded: false, reduction_ratio: 0.5 }, messages, minReductionRatio: 0.25 }).replace,
+    false,
   );
   assert.equal(
     decideReplacement({ report: { degraded: false, reduction_ratio: 0.05 }, messages, minReductionRatio: 0.25 }).replace,

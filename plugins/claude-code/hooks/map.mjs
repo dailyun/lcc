@@ -14,6 +14,8 @@ export const DEFAULT_OPTIONS = {
   maxStateTokens: 25000,
   maxRequestTokens: 30000,
   minReductionRatio: 0.25,
+  // Empty: no rules_mode is sent and the server default applies.
+  rulesMode: "",
 };
 
 /** Matches the shape `claude-code`'s SessionMessage rebuilds from. */
@@ -29,10 +31,13 @@ export function resolveOptions(options = {}) {
   const merged = { ...DEFAULT_OPTIONS };
   if (options.server) merged.server = String(options.server);
   if (options.question) merged.question = String(options.question);
-  // The MCP tool accepts jev | laya | auto; anything else falls back to the default
-  // rather than sending a value the tool would reject.
-  if (["jev", "laya", "auto"].includes(String(options.provider))) {
+  // The MCP tool accepts jev | laya | auto | rules; anything else falls back to the
+  // default rather than sending a value the tool would reject.
+  if (["jev", "laya", "auto", "rules"].includes(String(options.provider))) {
     merged.provider = String(options.provider);
+  }
+  if (["lossless", "lossy", "recoverable"].includes(String(options.rulesMode))) {
+    merged.rulesMode = String(options.rulesMode);
   }
   merged.threshold = number(options.threshold, DEFAULT_OPTIONS.threshold);
   merged.preserveRecentMessages = Math.max(
@@ -90,11 +95,20 @@ export function hasUnsupportedContent(messages) {
   return null;
 }
 
-/** The MCP arguments for `compact_transcript`; null when there is nothing to ask about. */
-export function buildCompactArgs({ messages, instructions, options }) {
+/**
+ * The MCP arguments for `compact_transcript`; null when there is nothing to ask about.
+ * `cwd` is the session's working directory: with rules_mode recoverable it becomes the
+ * workspace_root, so the server checks each removed file read against the disk.
+ */
+export function buildCompactArgs({ messages, instructions, options, cwd }) {
   const config = resolveOptions(options);
   const question = (config.question || instructions || deriveGoal(messages)).trim();
   if (!question) return null;
+  const rules = {};
+  if (config.rulesMode) rules.rules_mode = config.rulesMode;
+  if (config.rulesMode === "recoverable" && typeof cwd === "string" && cwd.startsWith("/")) {
+    rules.workspace_root = cwd;
+  }
   return {
     messages: toMcpMessages(messages),
     question,
@@ -105,6 +119,7 @@ export function buildCompactArgs({ messages, instructions, options }) {
     max_state_tokens: config.maxStateTokens,
     max_request_tokens: config.maxRequestTokens,
     min_reduction: config.minReductionRatio,
+    ...rules,
   };
 }
 
@@ -123,6 +138,8 @@ export function toMcpMessages(messages) {
       entry.toolResults = message.toolResults.map((result) => ({
         tool_use_id: result.tool_use_id,
         text: typeof result.text === "string" ? result.text : "",
+        // The rules policy keeps the latest failed call; forward the flag when present.
+        ...(result.is_error === true || result.isError === true ? { is_error: true } : {}),
       }));
     }
     return entry;
@@ -163,11 +180,17 @@ export function decideReplacement({ report, messages, minReductionRatio }) {
       reason: `below the ${(minimum * 100).toFixed(0)}% minimum (${(ratio * 100).toFixed(1)}%)`,
     };
   }
-  const dropped = report?.tool_calls_dropped ?? 0;
-  const trimmed = report?.tool_calls_trimmed ?? 0;
+  const dropped = number(report?.tool_calls_dropped, 0);
+  const trimmed = number(report?.tool_calls_trimmed, 0);
+  // rules_mode lossless/recoverable remove by pointer: dedupes and recovery replacements.
+  const deduped = number(report?.tool_calls_deduped, 0);
+  const replaced = number(report?.tool_calls_replaced, 0);
+  if (dropped + trimmed + deduped + replaced === 0) {
+    return { replace: false, reason: "the pass removed no tool output" };
+  }
   return {
     replace: true,
-    reason: `kept ${messages.length} messages, dropped ${dropped} tool call(s), trimmed ${trimmed}`,
+    reason: `kept ${messages.length} messages, dropped ${dropped} tool call(s), trimmed ${trimmed}, deduped ${deduped}, replaced ${replaced}`,
   };
 }
 

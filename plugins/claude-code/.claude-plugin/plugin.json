@@ -64,6 +64,12 @@
       "title": "Minimum reduction",
       "description": "Below this share of characters removed the plugin keeps Claude Code's built-in summary instead.",
       "default": 0.25
+    },
+    "rulesMode": {
+      "type": "string",
+      "title": "Rules mode",
+      "description": "Only with provider 'rules': 'lossless', 'recoverable' or 'lossy'. Empty uses the server default (lossless). 'recoverable' sends the session directory as workspace_root, so every removed file read is checked against the disk.",
+      "default": ""
     }
   }
 }

@@ -1,0 +1,1450 @@
+{
+ "False": {
+  "decisions": [
+   {
+    "chars": 613,
+    "chars_after": 53,
+    "decision": "dedupe",
+    "id": "c1",
+    "keep_call": null,
+    "keep_result": null,
+    "kept_at": "c2",
+    "message_index": 1,
+    "note": "[identical output kept at c2]",
+    "reason": "identical_output_kept_later",
+    "score": null,
+    "source": "rules",
+    "tool": "Bash"
+   },
+   {
+    "chars": 613,
+    "chars_after": 613,
+    "decision": "keep",
+    "id": "c2",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 3,
+    "reason": "not_recoverable",
+    "score": null,
+    "source": "rules",
+    "tool": "Bash"
+   },
+   {
+    "chars": 1227,
+    "chars_after": 69,
+    "decision": "replace",
+    "id": "c3",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 5,
+    "note": "[removed: re-read /r/src/a.py to recover]",
+    "reason": "recoverable_file_read",
+    "recover": {
+     "cwd": null,
+     "kind": "file",
+     "lines": null,
+     "path": "/r/src/a.py"
+    },
+    "recoverability_check": "transcript_proxy",
+    "score": null,
+    "source": "rules",
+    "tool": "Read"
+   },
+   {
+    "chars": 295,
+    "chars_after": 107,
+    "decision": "replace",
+    "id": "c4",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 7,
+    "note": "[removed: re-read /r/src/b.py (lines 5-12) to recover]",
+    "reason": "recoverable_file_read",
+    "recover": {
+     "cwd": null,
+     "kind": "file",
+     "lines": [
+      5,
+      12
+     ],
+     "path": "/r/src/b.py"
+    },
+    "recoverability_check": "transcript_proxy",
+    "score": null,
+    "source": "rules",
+    "tool": "Read"
+   },
+   {
+    "chars": 967,
+    "chars_after": 87,
+    "decision": "replace",
+    "id": "c5",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 9,
+    "note": "[removed: re-read src/c.py (cwd /r) to recover]",
+    "reason": "recoverable_file_read",
+    "recover": {
+     "cwd": "/r",
+     "kind": "file",
+     "lines": null,
+     "path": "src/c.py"
+    },
+    "recoverability_check": "transcript_proxy",
+    "score": null,
+    "source": "rules",
+    "tool": "Bash"
+   },
+   {
+    "chars": 238,
+    "chars_after": 111,
+    "decision": "replace",
+    "id": "c6",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 11,
+    "note": "[removed: re-read src/d.py (lines 5-12) (cwd /r) to recover]",
+    "reason": "recoverable_file_read",
+    "recover": {
+     "cwd": "/r",
+     "kind": "file",
+     "lines": [
+      5,
+      12
+     ],
+     "path": "src/d.py"
+    },
+    "recoverability_check": "transcript_proxy",
+    "score": null,
+    "source": "rules",
+    "tool": "Bash"
+   },
+   {
+    "chars": 326,
+    "chars_after": 107,
+    "decision": "replace",
+    "id": "c7",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 13,
+    "note": "[removed: re-read src/e.py (lines 1-12) (cwd /r) to recover]",
+    "reason": "recoverable_file_read",
+    "recover": {
+     "cwd": "/r",
+     "kind": "file",
+     "lines": [
+      1,
+      12
+     ],
+     "path": "src/e.py"
+    },
+    "recoverability_check": "transcript_proxy",
+    "score": null,
+    "source": "rules",
+    "tool": "Bash"
+   },
+   {
+    "chars": 221,
+    "chars_after": 221,
+    "decision": "keep",
+    "id": "c8",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 15,
+    "reason": "command_output_changed_later",
+    "score": null,
+    "source": "rules",
+    "tool": "Bash"
+   },
+   {
+    "chars": 520,
+    "chars_after": 520,
+    "decision": "keep",
+    "id": "c9",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 17,
+    "reason": "command_output_changed_later",
+    "score": null,
+    "source": "rules",
+    "tool": "Bash"
+   },
+   {
+    "chars": 525,
+    "chars_after": 525,
+    "decision": "keep",
+    "id": "c10",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 19,
+    "reason": "command_output_changed_later",
+    "score": null,
+    "source": "rules",
+    "tool": "Bash"
+   },
+   {
+    "chars": 1227,
+    "chars_after": 1227,
+    "decision": "keep",
+    "id": "c11",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 21,
+    "reason": "file_written_later",
+    "score": null,
+    "source": "rules",
+    "tool": "Read"
+   },
+   {
+    "chars": 1227,
+    "chars_after": 1227,
+    "decision": "keep",
+    "id": "c12",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 23,
+    "reason": "file_written_later",
+    "score": null,
+    "source": "rules",
+    "tool": "Read"
+   },
+   {
+    "chars": 1225,
+    "chars_after": 1225,
+    "decision": "keep",
+    "id": "c13",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 25,
+    "reason": "temp_path",
+    "score": null,
+    "source": "rules",
+    "tool": "Read"
+   },
+   {
+    "chars": 1300,
+    "chars_after": 1300,
+    "decision": "keep",
+    "id": "c14",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 27,
+    "reason": "file_written_later",
+    "score": null,
+    "source": "rules",
+    "tool": "Read"
+   },
+   {
+    "chars": 304,
+    "chars_after": 304,
+    "decision": "keep",
+    "id": "c15",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 29,
+    "reason": "read_range_unknown",
+    "score": null,
+    "source": "rules",
+    "tool": "Read"
+   },
+   {
+    "chars": 68,
+    "chars_after": 68,
+    "decision": "keep",
+    "id": "c16",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 31,
+    "reason": "not_recoverable",
+    "score": null,
+    "source": "rules",
+    "tool": "Edit"
+   },
+   {
+    "chars": 41,
+    "chars_after": 41,
+    "decision": "keep",
+    "id": "c17",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 33,
+    "reason": "not_recoverable",
+    "score": null,
+    "source": "rules",
+    "tool": "exec_command"
+   },
+   {
+    "chars": 26,
+    "chars_after": 26,
+    "decision": "keep",
+    "id": "c18",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 35,
+    "reason": "not_recoverable",
+    "score": null,
+    "source": "rules",
+    "tool": "Grep"
+   }
+  ],
+  "messages": [
+   {
+    "role": "user",
+    "text": "fix the parser"
+   },
+   {
+    "role": "assistant",
+    "text": "step 1",
+    "toolUses": [
+     {
+      "input": {
+       "command": "pytest -q"
+      },
+      "tool": "Bash",
+      "tool_use_id": "c1"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "[identical output kept at c2]",
+      "tool_use_id": "c1"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 2",
+    "toolUses": [
+     {
+      "input": {
+       "command": "pytest -q"
+      },
+      "tool": "Bash",
+      "tool_use_id": "c2"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "test_0 PASSED\ntest_1 PASSED\ntest_2 PASSED\ntest_3 PASSED\ntest_4 PASSED\ntest_5 PASSED\ntest_6 PASSED\ntest_7 PASSED\ntest_8 PASSED\ntest_9 PASSED\ntest_10 PASSED\ntest_11 PASSED\ntest_12 PASSED\ntest_13 PASSED\ntest_14 PASSED\ntest_15 PASSED\ntest_16 PASSED\ntest_17 PASSED\ntest_18 PASSED\ntest_19 PASSED\ntest_20 PASSED\ntest_21 PASSED\ntest_22 PASSED\ntest_23 PASSED\ntest_24 PASSED\ntest_25 PASSED\ntest_26 PASSED\ntest_27 PASSED\ntest_28 PASSED\ntest_29 PASSED\ntest_30 PASSED\ntest_31 PASSED\ntest_32 PASSED\ntest_33 PASSED\ntest_34 PASSED\ntest_35 PASSED\ntest_36 PASSED\ntest_37 PASSED\ntest_38 PASSED\ntest_39 PASSED",
+      "tool_use_id": "c2"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 3",
+    "toolUses": [
+     {
+      "input": {
+       "file_path": "/r/src/a.py"
+      },
+      "tool": "Read",
+      "tool_use_id": "c3"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "[removed: re-read /r/src/a.py to recover]",
+      "tool_use_id": "c3"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 4",
+    "toolUses": [
+     {
+      "input": {
+       "file_path": "/r/src/b.py",
+       "limit": 8,
+       "offset": 5
+      },
+      "tool": "Read",
+      "tool_use_id": "c4"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "[removed: re-read /r/src/b.py (lines 5-12) to recover]",
+      "tool_use_id": "c4"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 5",
+    "toolUses": [
+     {
+      "input": {
+       "command": "cat src/c.py",
+       "cwd": "/r"
+      },
+      "tool": "Bash",
+      "tool_use_id": "c5"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "[removed: re-read src/c.py (cwd /r) to recover]",
+      "tool_use_id": "c5"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 6",
+    "toolUses": [
+     {
+      "input": {
+       "command": "sed -n '5,12p' src/d.py",
+       "cwd": "/r"
+      },
+      "tool": "Bash",
+      "tool_use_id": "c6"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "[removed: re-read src/d.py (lines 5-12) (cwd /r) to recover]",
+      "tool_use_id": "c6"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 7",
+    "toolUses": [
+     {
+      "input": {
+       "command": "head -n 12 src/e.py",
+       "cwd": "/r"
+      },
+      "tool": "Bash",
+      "tool_use_id": "c7"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "[removed: re-read src/e.py (lines 1-12) (cwd /r) to recover]",
+      "tool_use_id": "c7"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 8",
+    "toolUses": [
+     {
+      "input": {
+       "command": "tail -n 5 src/f.py",
+       "cwd": "/r"
+      },
+      "tool": "Bash",
+      "tool_use_id": "c8"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "f line 1 of the parser\nf line 2 of the parser\nf line 3 of the parser\nf line 4 of the parser\nf line 5 of the parser\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+      "tool_use_id": "c8"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 9",
+    "toolUses": [
+     {
+      "input": {
+       "command": "ls src"
+      },
+      "tool": "Bash",
+      "tool_use_id": "c9"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "src/module_0.py\nsrc/module_1.py\nsrc/module_2.py\nsrc/module_3.py\nsrc/module_4.py\nsrc/module_5.py\nsrc/module_6.py\nsrc/module_7.py\nsrc/module_8.py\nsrc/module_9.py\nsrc/module_10.py\nsrc/module_11.py\nsrc/module_12.py\nsrc/module_13.py\nsrc/module_14.py\nsrc/module_15.py\nsrc/module_16.py\nsrc/module_17.py\nsrc/module_18.py\nsrc/module_19.py\nsrc/module_20.py\nsrc/module_21.py\nsrc/module_22.py\nsrc/module_23.py\nsrc/module_24.py\nsrc/module_25.py\nsrc/module_26.py\nsrc/module_27.py\nsrc/module_28.py\nsrc/module_29.py",
+      "tool_use_id": "c9"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 10",
+    "toolUses": [
+     {
+      "input": {
+       "command": "git status"
+      },
+      "tool": "Bash",
+      "tool_use_id": "c10"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "src/module_0.py\nsrc/module_1.py\nsrc/module_2.py\nsrc/module_3.py\nsrc/module_4.py\nsrc/module_5.py\nsrc/module_6.py\nsrc/module_7.py\nsrc/module_8.py\nsrc/module_9.py\nsrc/module_10.py\nsrc/module_11.py\nsrc/module_12.py\nsrc/module_13.py\nsrc/module_14.py\nsrc/module_15.py\nsrc/module_16.py\nsrc/module_17.py\nsrc/module_18.py\nsrc/module_19.py\nsrc/module_20.py\nsrc/module_21.py\nsrc/module_22.py\nsrc/module_23.py\nsrc/module_24.py\nsrc/module_25.py\nsrc/module_26.py\nsrc/module_27.py\nsrc/module_28.py\nsrc/module_29.pyx",
+      "tool_use_id": "c10"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 11",
+    "toolUses": [
+     {
+      "input": {
+       "file_path": "/r/src/g.py"
+      },
+      "tool": "Read",
+      "tool_use_id": "c11"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "     1\tg line 1 of the parser\n     2\tg line 2 of the parser\n     3\tg line 3 of the parser\n     4\tg line 4 of the parser\n     5\tg line 5 of the parser\n     6\tg line 6 of the parser\n     7\tg line 7 of the parser\n     8\tg line 8 of the parser\n     9\tg line 9 of the parser\n    10\tg line 10 of the parser\n    11\tg line 11 of the parser\n    12\tg line 12 of the parser\n    13\tg line 13 of the parser\n    14\tg line 14 of the parser\n    15\tg line 15 of the parser\n    16\tg line 16 of the parser\n    17\tg line 17 of the parser\n    18\tg line 18 of the parser\n    19\tg line 19 of the parser\n    20\tg line 20 of the parser\n    21\tg line 21 of the parser\n    22\tg line 22 of the parser\n    23\tg line 23 of the parser\n    24\tg line 24 of the parser\n    25\tg line 25 of the parser\n    26\tg line 26 of the parser\n    27\tg line 27 of the parser\n    28\tg line 28 of the parser\n    29\tg line 29 of the parser\n    30\tg line 30 of the parser\n    31\tg line 31 of the parser\n    32\tg line 32 of the parser\n    33\tg line 33 of the parser\n    34\tg line 34 of the parser\n    35\tg line 35 of the parser\n    36\tg line 36 of the parser\n    37\tg line 37 of the parser\n    38\tg line 38 of the parser\n    39\tg line 39 of the parser",
+      "tool_use_id": "c11"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 12",
+    "toolUses": [
+     {
+      "input": {
+       "file_path": "/r/sub/h.py"
+      },
+      "tool": "Read",
+      "tool_use_id": "c12"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "     1\th line 1 of the parser\n     2\th line 2 of the parser\n     3\th line 3 of the parser\n     4\th line 4 of the parser\n     5\th line 5 of the parser\n     6\th line 6 of the parser\n     7\th line 7 of the parser\n     8\th line 8 of the parser\n     9\th line 9 of the parser\n    10\th line 10 of the parser\n    11\th line 11 of the parser\n    12\th line 12 of the parser\n    13\th line 13 of the parser\n    14\th line 14 of the parser\n    15\th line 15 of the parser\n    16\th line 16 of the parser\n    17\th line 17 of the parser\n    18\th line 18 of the parser\n    19\th line 19 of the parser\n    20\th line 20 of the parser\n    21\th line 21 of the parser\n    22\th line 22 of the parser\n    23\th line 23 of the parser\n    24\th line 24 of the parser\n    25\th line 25 of the parser\n    26\th line 26 of the parser\n    27\th line 27 of the parser\n    28\th line 28 of the parser\n    29\th line 29 of the parser\n    30\th line 30 of the parser\n    31\th line 31 of the parser\n    32\th line 32 of the parser\n    33\th line 33 of the parser\n    34\th line 34 of the parser\n    35\th line 35 of the parser\n    36\th line 36 of the parser\n    37\th line 37 of the parser\n    38\th line 38 of the parser\n    39\th line 39 of the parser",
+      "tool_use_id": "c12"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 13",
+    "toolUses": [
+     {
+      "input": {
+       "file_path": "/tmp/t.py"
+      },
+      "tool": "Read",
+      "tool_use_id": "c13"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "     1\tt line 1 of the parser\n     2\tt line 2 of the parser\n     3\tt line 3 of the parser\n     4\tt line 4 of the parser\n     5\tt line 5 of the parser\n     6\tt line 6 of the parser\n     7\tt line 7 of the parser\n     8\tt line 8 of the parser\n     9\tt line 9 of the parser\n    10\tt line 10 of the parser\n    11\tt line 11 of the parser\n    12\tt line 12 of the parser\n    13\tt line 13 of the parser\n    14\tt line 14 of the parser\n    15\tt line 15 of the parser\n    16\tt line 16 of the parser\n    17\tt line 17 of the parser\n    18\tt line 18 of the parser\n    19\tt line 19 of the parser\n    20\tt line 20 of the parser\n    21\tt line 21 of the parser\n    22\tt line 22 of the parser\n    23\tt line 23 of the parser\n    24\tt line 24 of the parser\n    25\tt line 25 of the parser\n    26\tt line 26 of the parser\n    27\tt line 27 of the parser\n    28\tt line 28 of the parser\n    29\tt line 29 of the parser\n    30\tt line 30 of the parser\n    31\tt line 31 of the parser\n    32\tt line 32 of the parser\n    33\tt line 33 of the parser\n    34\tt line 34 of the parser\n    35\tt line 35 of the parser\n    36\tt line 36 of the parser\n    37\tt line 37 of the parser\n    38\tt line 38 of the parser\n    39\tt line 39 of the parser",
+      "tool_use_id": "c13"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 14",
+    "toolUses": [
+     {
+      "input": {
+       "file_path": "rel.py"
+      },
+      "tool": "Read",
+      "tool_use_id": "c14"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "     1\trel line 1 of the parser\n     2\trel line 2 of the parser\n     3\trel line 3 of the parser\n     4\trel line 4 of the parser\n     5\trel line 5 of the parser\n     6\trel line 6 of the parser\n     7\trel line 7 of the parser\n     8\trel line 8 of the parser\n     9\trel line 9 of the parser\n    10\trel line 10 of the parser\n    11\trel line 11 of the parser\n    12\trel line 12 of the parser\n    13\trel line 13 of the parser\n    14\trel line 14 of the parser\n    15\trel line 15 of the parser\n    16\trel line 16 of the parser\n    17\trel line 17 of the parser\n    18\trel line 18 of the parser\n    19\trel line 19 of the parser\n    20\trel line 20 of the parser\n    21\trel line 21 of the parser\n    22\trel line 22 of the parser\n    23\trel line 23 of the parser\n    24\trel line 24 of the parser\n    25\trel line 25 of the parser\n    26\trel line 26 of the parser\n    27\trel line 27 of the parser\n    28\trel line 28 of the parser\n    29\trel line 29 of the parser\n    30\trel line 30 of the parser\n    31\trel line 31 of the parser\n    32\trel line 32 of the parser\n    33\trel line 33 of the parser\n    34\trel line 34 of the parser\n    35\trel line 35 of the parser\n    36\trel line 36 of the parser\n    37\trel line 37 of the parser\n    38\trel line 38 of the parser\n    39\trel line 39 of the parser",
+      "tool_use_id": "c14"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 15",
+    "toolUses": [
+     {
+      "input": {
+       "file_path": "/r/src/b.py",
+       "limit": 3,
+       "offset": 50
+      },
+      "tool": "Read",
+      "tool_use_id": "c15"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "     5\tb2 line 5 of the parser\n     6\tb2 line 6 of the parser\n     7\tb2 line 7 of the parser\n     8\tb2 line 8 of the parser\n     9\tb2 line 9 of the parser\n    10\tb2 line 10 of the parser\n    11\tb2 line 11 of the parser\n    12\tb2 line 12 of the parser",
+      "tool_use_id": "c15"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 16",
+    "toolUses": [
+     {
+      "input": {
+       "file_path": "/r/src/g.py",
+       "new_string": "b",
+       "old_string": "a"
+      },
+      "tool": "Edit",
+      "tool_use_id": "c16"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "ok",
+      "tool_use_id": "c16"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 17",
+    "toolUses": [
+     {
+      "input": {
+       "cmd": "make",
+       "workdir": "/r/sub"
+      },
+      "tool": "exec_command",
+      "tool_use_id": "c17"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "built",
+      "tool_use_id": "c17"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 18",
+    "toolUses": [
+     {
+      "input": {
+       "pattern": "todo"
+      },
+      "tool": "Grep",
+      "tool_use_id": "c18"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "1 match",
+      "tool_use_id": "c18"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "wrap"
+   }
+  ]
+ },
+ "True": {
+  "decisions": [
+   {
+    "chars": 613,
+    "chars_after": 53,
+    "decision": "dedupe",
+    "id": "c1",
+    "keep_call": null,
+    "keep_result": null,
+    "kept_at": "c2",
+    "message_index": 1,
+    "note": "[identical output kept at c2]",
+    "reason": "identical_output_kept_later",
+    "score": null,
+    "source": "rules",
+    "tool": "Bash"
+   },
+   {
+    "chars": 613,
+    "chars_after": 613,
+    "decision": "keep",
+    "id": "c2",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 3,
+    "reason": "not_recoverable",
+    "score": null,
+    "source": "rules",
+    "tool": "Bash"
+   },
+   {
+    "chars": 1227,
+    "chars_after": 69,
+    "decision": "replace",
+    "id": "c3",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 5,
+    "note": "[removed: re-read /r/src/a.py to recover]",
+    "reason": "recoverable_file_read",
+    "recover": {
+     "cwd": null,
+     "kind": "file",
+     "lines": null,
+     "path": "/r/src/a.py"
+    },
+    "recoverability_check": "transcript_proxy",
+    "score": null,
+    "source": "rules",
+    "tool": "Read"
+   },
+   {
+    "chars": 295,
+    "chars_after": 107,
+    "decision": "replace",
+    "id": "c4",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 7,
+    "note": "[removed: re-read /r/src/b.py (lines 5-12) to recover]",
+    "reason": "recoverable_file_read",
+    "recover": {
+     "cwd": null,
+     "kind": "file",
+     "lines": [
+      5,
+      12
+     ],
+     "path": "/r/src/b.py"
+    },
+    "recoverability_check": "transcript_proxy",
+    "score": null,
+    "source": "rules",
+    "tool": "Read"
+   },
+   {
+    "chars": 967,
+    "chars_after": 87,
+    "decision": "replace",
+    "id": "c5",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 9,
+    "note": "[removed: re-read src/c.py (cwd /r) to recover]",
+    "reason": "recoverable_file_read",
+    "recover": {
+     "cwd": "/r",
+     "kind": "file",
+     "lines": null,
+     "path": "src/c.py"
+    },
+    "recoverability_check": "transcript_proxy",
+    "score": null,
+    "source": "rules",
+    "tool": "Bash"
+   },
+   {
+    "chars": 238,
+    "chars_after": 111,
+    "decision": "replace",
+    "id": "c6",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 11,
+    "note": "[removed: re-read src/d.py (lines 5-12) (cwd /r) to recover]",
+    "reason": "recoverable_file_read",
+    "recover": {
+     "cwd": "/r",
+     "kind": "file",
+     "lines": [
+      5,
+      12
+     ],
+     "path": "src/d.py"
+    },
+    "recoverability_check": "transcript_proxy",
+    "score": null,
+    "source": "rules",
+    "tool": "Bash"
+   },
+   {
+    "chars": 326,
+    "chars_after": 107,
+    "decision": "replace",
+    "id": "c7",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 13,
+    "note": "[removed: re-read src/e.py (lines 1-12) (cwd /r) to recover]",
+    "reason": "recoverable_file_read",
+    "recover": {
+     "cwd": "/r",
+     "kind": "file",
+     "lines": [
+      1,
+      12
+     ],
+     "path": "src/e.py"
+    },
+    "recoverability_check": "transcript_proxy",
+    "score": null,
+    "source": "rules",
+    "tool": "Bash"
+   },
+   {
+    "chars": 221,
+    "chars_after": 221,
+    "decision": "keep",
+    "id": "c8",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 15,
+    "reason": "command_output_changed_later",
+    "score": null,
+    "source": "rules",
+    "tool": "Bash"
+   },
+   {
+    "chars": 520,
+    "chars_after": 520,
+    "decision": "keep",
+    "id": "c9",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 17,
+    "reason": "command_output_changed_later",
+    "score": null,
+    "source": "rules",
+    "tool": "Bash"
+   },
+   {
+    "chars": 525,
+    "chars_after": 525,
+    "decision": "keep",
+    "id": "c10",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 19,
+    "reason": "command_output_changed_later",
+    "score": null,
+    "source": "rules",
+    "tool": "Bash"
+   },
+   {
+    "chars": 1227,
+    "chars_after": 1227,
+    "decision": "keep",
+    "id": "c11",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 21,
+    "reason": "file_written_later",
+    "score": null,
+    "source": "rules",
+    "tool": "Read"
+   },
+   {
+    "chars": 1227,
+    "chars_after": 1227,
+    "decision": "keep",
+    "id": "c12",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 23,
+    "reason": "file_written_later",
+    "score": null,
+    "source": "rules",
+    "tool": "Read"
+   },
+   {
+    "chars": 1225,
+    "chars_after": 1225,
+    "decision": "keep",
+    "id": "c13",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 25,
+    "reason": "temp_path",
+    "score": null,
+    "source": "rules",
+    "tool": "Read"
+   },
+   {
+    "chars": 1300,
+    "chars_after": 1300,
+    "decision": "keep",
+    "id": "c14",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 27,
+    "reason": "file_written_later",
+    "score": null,
+    "source": "rules",
+    "tool": "Read"
+   },
+   {
+    "chars": 304,
+    "chars_after": 304,
+    "decision": "keep",
+    "id": "c15",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 29,
+    "reason": "read_range_unknown",
+    "score": null,
+    "source": "rules",
+    "tool": "Read"
+   },
+   {
+    "chars": 68,
+    "chars_after": 68,
+    "decision": "keep",
+    "id": "c16",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 31,
+    "reason": "not_recoverable",
+    "score": null,
+    "source": "rules",
+    "tool": "Edit"
+   },
+   {
+    "chars": 41,
+    "chars_after": 41,
+    "decision": "keep",
+    "id": "c17",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 33,
+    "reason": "not_recoverable",
+    "score": null,
+    "source": "rules",
+    "tool": "exec_command"
+   },
+   {
+    "chars": 26,
+    "chars_after": 26,
+    "decision": "keep",
+    "id": "c18",
+    "keep_call": null,
+    "keep_result": null,
+    "message_index": 35,
+    "reason": "not_recoverable",
+    "score": null,
+    "source": "rules",
+    "tool": "Grep"
+   }
+  ],
+  "messages": [
+   {
+    "role": "user",
+    "text": "fix the parser"
+   },
+   {
+    "role": "assistant",
+    "text": "step 1",
+    "toolUses": [
+     {
+      "input": {
+       "command": "pytest -q"
+      },
+      "tool": "Bash",
+      "tool_use_id": "c1"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "[identical output kept at c2]",
+      "tool_use_id": "c1"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 2",
+    "toolUses": [
+     {
+      "input": {
+       "command": "pytest -q"
+      },
+      "tool": "Bash",
+      "tool_use_id": "c2"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "test_0 PASSED\ntest_1 PASSED\ntest_2 PASSED\ntest_3 PASSED\ntest_4 PASSED\ntest_5 PASSED\ntest_6 PASSED\ntest_7 PASSED\ntest_8 PASSED\ntest_9 PASSED\ntest_10 PASSED\ntest_11 PASSED\ntest_12 PASSED\ntest_13 PASSED\ntest_14 PASSED\ntest_15 PASSED\ntest_16 PASSED\ntest_17 PASSED\ntest_18 PASSED\ntest_19 PASSED\ntest_20 PASSED\ntest_21 PASSED\ntest_22 PASSED\ntest_23 PASSED\ntest_24 PASSED\ntest_25 PASSED\ntest_26 PASSED\ntest_27 PASSED\ntest_28 PASSED\ntest_29 PASSED\ntest_30 PASSED\ntest_31 PASSED\ntest_32 PASSED\ntest_33 PASSED\ntest_34 PASSED\ntest_35 PASSED\ntest_36 PASSED\ntest_37 PASSED\ntest_38 PASSED\ntest_39 PASSED",
+      "tool_use_id": "c2"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 3",
+    "toolUses": [
+     {
+      "input": {
+       "file_path": "/r/src/a.py"
+      },
+      "tool": "Read",
+      "tool_use_id": "c3"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "[removed: re-read /r/src/a.py to recover]",
+      "tool_use_id": "c3"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 4",
+    "toolUses": [
+     {
+      "input": {
+       "file_path": "/r/src/b.py",
+       "limit": 8,
+       "offset": 5
+      },
+      "tool": "Read",
+      "tool_use_id": "c4"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "[removed: re-read /r/src/b.py (lines 5-12) to recover]",
+      "tool_use_id": "c4"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 5",
+    "toolUses": [
+     {
+      "input": {
+       "command": "cat src/c.py",
+       "cwd": "/r"
+      },
+      "tool": "Bash",
+      "tool_use_id": "c5"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "[removed: re-read src/c.py (cwd /r) to recover]",
+      "tool_use_id": "c5"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 6",
+    "toolUses": [
+     {
+      "input": {
+       "command": "sed -n '5,12p' src/d.py",
+       "cwd": "/r"
+      },
+      "tool": "Bash",
+      "tool_use_id": "c6"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "[removed: re-read src/d.py (lines 5-12) (cwd /r) to recover]",
+      "tool_use_id": "c6"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 7",
+    "toolUses": [
+     {
+      "input": {
+       "command": "head -n 12 src/e.py",
+       "cwd": "/r"
+      },
+      "tool": "Bash",
+      "tool_use_id": "c7"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "[removed: re-read src/e.py (lines 1-12) (cwd /r) to recover]",
+      "tool_use_id": "c7"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 8",
+    "toolUses": [
+     {
+      "input": {
+       "command": "tail -n 5 src/f.py",
+       "cwd": "/r"
+      },
+      "tool": "Bash",
+      "tool_use_id": "c8"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "f line 1 of the parser\nf line 2 of the parser\nf line 3 of the parser\nf line 4 of the parser\nf line 5 of the parser\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+      "tool_use_id": "c8"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 9",
+    "toolUses": [
+     {
+      "input": {
+       "command": "ls src"
+      },
+      "tool": "Bash",
+      "tool_use_id": "c9"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "src/module_0.py\nsrc/module_1.py\nsrc/module_2.py\nsrc/module_3.py\nsrc/module_4.py\nsrc/module_5.py\nsrc/module_6.py\nsrc/module_7.py\nsrc/module_8.py\nsrc/module_9.py\nsrc/module_10.py\nsrc/module_11.py\nsrc/module_12.py\nsrc/module_13.py\nsrc/module_14.py\nsrc/module_15.py\nsrc/module_16.py\nsrc/module_17.py\nsrc/module_18.py\nsrc/module_19.py\nsrc/module_20.py\nsrc/module_21.py\nsrc/module_22.py\nsrc/module_23.py\nsrc/module_24.py\nsrc/module_25.py\nsrc/module_26.py\nsrc/module_27.py\nsrc/module_28.py\nsrc/module_29.py",
+      "tool_use_id": "c9"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 10",
+    "toolUses": [
+     {
+      "input": {
+       "command": "git status"
+      },
+      "tool": "Bash",
+      "tool_use_id": "c10"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "src/module_0.py\nsrc/module_1.py\nsrc/module_2.py\nsrc/module_3.py\nsrc/module_4.py\nsrc/module_5.py\nsrc/module_6.py\nsrc/module_7.py\nsrc/module_8.py\nsrc/module_9.py\nsrc/module_10.py\nsrc/module_11.py\nsrc/module_12.py\nsrc/module_13.py\nsrc/module_14.py\nsrc/module_15.py\nsrc/module_16.py\nsrc/module_17.py\nsrc/module_18.py\nsrc/module_19.py\nsrc/module_20.py\nsrc/module_21.py\nsrc/module_22.py\nsrc/module_23.py\nsrc/module_24.py\nsrc/module_25.py\nsrc/module_26.py\nsrc/module_27.py\nsrc/module_28.py\nsrc/module_29.pyx",
+      "tool_use_id": "c10"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 11",
+    "toolUses": [
+     {
+      "input": {
+       "file_path": "/r/src/g.py"
+      },
+      "tool": "Read",
+      "tool_use_id": "c11"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "     1\tg line 1 of the parser\n     2\tg line 2 of the parser\n     3\tg line 3 of the parser\n     4\tg line 4 of the parser\n     5\tg line 5 of the parser\n     6\tg line 6 of the parser\n     7\tg line 7 of the parser\n     8\tg line 8 of the parser\n     9\tg line 9 of the parser\n    10\tg line 10 of the parser\n    11\tg line 11 of the parser\n    12\tg line 12 of the parser\n    13\tg line 13 of the parser\n    14\tg line 14 of the parser\n    15\tg line 15 of the parser\n    16\tg line 16 of the parser\n    17\tg line 17 of the parser\n    18\tg line 18 of the parser\n    19\tg line 19 of the parser\n    20\tg line 20 of the parser\n    21\tg line 21 of the parser\n    22\tg line 22 of the parser\n    23\tg line 23 of the parser\n    24\tg line 24 of the parser\n    25\tg line 25 of the parser\n    26\tg line 26 of the parser\n    27\tg line 27 of the parser\n    28\tg line 28 of the parser\n    29\tg line 29 of the parser\n    30\tg line 30 of the parser\n    31\tg line 31 of the parser\n    32\tg line 32 of the parser\n    33\tg line 33 of the parser\n    34\tg line 34 of the parser\n    35\tg line 35 of the parser\n    36\tg line 36 of the parser\n    37\tg line 37 of the parser\n    38\tg line 38 of the parser\n    39\tg line 39 of the parser",
+      "tool_use_id": "c11"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 12",
+    "toolUses": [
+     {
+      "input": {
+       "file_path": "/r/sub/h.py"
+      },
+      "tool": "Read",
+      "tool_use_id": "c12"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "     1\th line 1 of the parser\n     2\th line 2 of the parser\n     3\th line 3 of the parser\n     4\th line 4 of the parser\n     5\th line 5 of the parser\n     6\th line 6 of the parser\n     7\th line 7 of the parser\n     8\th line 8 of the parser\n     9\th line 9 of the parser\n    10\th line 10 of the parser\n    11\th line 11 of the parser\n    12\th line 12 of the parser\n    13\th line 13 of the parser\n    14\th line 14 of the parser\n    15\th line 15 of the parser\n    16\th line 16 of the parser\n    17\th line 17 of the parser\n    18\th line 18 of the parser\n    19\th line 19 of the parser\n    20\th line 20 of the parser\n    21\th line 21 of the parser\n    22\th line 22 of the parser\n    23\th line 23 of the parser\n    24\th line 24 of the parser\n    25\th line 25 of the parser\n    26\th line 26 of the parser\n    27\th line 27 of the parser\n    28\th line 28 of the parser\n    29\th line 29 of the parser\n    30\th line 30 of the parser\n    31\th line 31 of the parser\n    32\th line 32 of the parser\n    33\th line 33 of the parser\n    34\th line 34 of the parser\n    35\th line 35 of the parser\n    36\th line 36 of the parser\n    37\th line 37 of the parser\n    38\th line 38 of the parser\n    39\th line 39 of the parser",
+      "tool_use_id": "c12"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 13",
+    "toolUses": [
+     {
+      "input": {
+       "file_path": "/tmp/t.py"
+      },
+      "tool": "Read",
+      "tool_use_id": "c13"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "     1\tt line 1 of the parser\n     2\tt line 2 of the parser\n     3\tt line 3 of the parser\n     4\tt line 4 of the parser\n     5\tt line 5 of the parser\n     6\tt line 6 of the parser\n     7\tt line 7 of the parser\n     8\tt line 8 of the parser\n     9\tt line 9 of the parser\n    10\tt line 10 of the parser\n    11\tt line 11 of the parser\n    12\tt line 12 of the parser\n    13\tt line 13 of the parser\n    14\tt line 14 of the parser\n    15\tt line 15 of the parser\n    16\tt line 16 of the parser\n    17\tt line 17 of the parser\n    18\tt line 18 of the parser\n    19\tt line 19 of the parser\n    20\tt line 20 of the parser\n    21\tt line 21 of the parser\n    22\tt line 22 of the parser\n    23\tt line 23 of the parser\n    24\tt line 24 of the parser\n    25\tt line 25 of the parser\n    26\tt line 26 of the parser\n    27\tt line 27 of the parser\n    28\tt line 28 of the parser\n    29\tt line 29 of the parser\n    30\tt line 30 of the parser\n    31\tt line 31 of the parser\n    32\tt line 32 of the parser\n    33\tt line 33 of the parser\n    34\tt line 34 of the parser\n    35\tt line 35 of the parser\n    36\tt line 36 of the parser\n    37\tt line 37 of the parser\n    38\tt line 38 of the parser\n    39\tt line 39 of the parser",
+      "tool_use_id": "c13"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 14",
+    "toolUses": [
+     {
+      "input": {
+       "file_path": "rel.py"
+      },
+      "tool": "Read",
+      "tool_use_id": "c14"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "     1\trel line 1 of the parser\n     2\trel line 2 of the parser\n     3\trel line 3 of the parser\n     4\trel line 4 of the parser\n     5\trel line 5 of the parser\n     6\trel line 6 of the parser\n     7\trel line 7 of the parser\n     8\trel line 8 of the parser\n     9\trel line 9 of the parser\n    10\trel line 10 of the parser\n    11\trel line 11 of the parser\n    12\trel line 12 of the parser\n    13\trel line 13 of the parser\n    14\trel line 14 of the parser\n    15\trel line 15 of the parser\n    16\trel line 16 of the parser\n    17\trel line 17 of the parser\n    18\trel line 18 of the parser\n    19\trel line 19 of the parser\n    20\trel line 20 of the parser\n    21\trel line 21 of the parser\n    22\trel line 22 of the parser\n    23\trel line 23 of the parser\n    24\trel line 24 of the parser\n    25\trel line 25 of the parser\n    26\trel line 26 of the parser\n    27\trel line 27 of the parser\n    28\trel line 28 of the parser\n    29\trel line 29 of the parser\n    30\trel line 30 of the parser\n    31\trel line 31 of the parser\n    32\trel line 32 of the parser\n    33\trel line 33 of the parser\n    34\trel line 34 of the parser\n    35\trel line 35 of the parser\n    36\trel line 36 of the parser\n    37\trel line 37 of the parser\n    38\trel line 38 of the parser\n    39\trel line 39 of the parser",
+      "tool_use_id": "c14"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 15",
+    "toolUses": [
+     {
+      "input": {
+       "file_path": "/r/src/b.py",
+       "limit": 3,
+       "offset": 50
+      },
+      "tool": "Read",
+      "tool_use_id": "c15"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "     5\tb2 line 5 of the parser\n     6\tb2 line 6 of the parser\n     7\tb2 line 7 of the parser\n     8\tb2 line 8 of the parser\n     9\tb2 line 9 of the parser\n    10\tb2 line 10 of the parser\n    11\tb2 line 11 of the parser\n    12\tb2 line 12 of the parser",
+      "tool_use_id": "c15"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 16",
+    "toolUses": [
+     {
+      "input": {
+       "file_path": "/r/src/g.py",
+       "new_string": "b",
+       "old_string": "a"
+      },
+      "tool": "Edit",
+      "tool_use_id": "c16"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "ok",
+      "tool_use_id": "c16"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 17",
+    "toolUses": [
+     {
+      "input": {
+       "cmd": "make",
+       "workdir": "/r/sub"
+      },
+      "tool": "exec_command",
+      "tool_use_id": "c17"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "built",
+      "tool_use_id": "c17"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "step 18",
+    "toolUses": [
+     {
+      "input": {
+       "pattern": "todo"
+      },
+      "tool": "Grep",
+      "tool_use_id": "c18"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+     {
+      "text": "1 match",
+      "tool_use_id": "c18"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "text": "wrap"
+   }
+  ]
+ }
+}

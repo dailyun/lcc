@@ -42,7 +42,8 @@ The plugin registers one hook:
 Every outcome is reported in one toast and one log line, and each per-call decision is in
 the report the tool returns:
 
-- `lcc: verbatim compaction, no summary (kept N messages, dropped D tool call(s), trimmed T)`
+- `lcc: verbatim compaction, no summary (kept N messages, dropped D tool call(s), trimmed T, deduped P, replaced R)`
+- `lcc: built-in summary (the pass removed no tool output)`
 - `lcc: built-in summary (below the 25% minimum (4.2%))`
 - `lcc: built-in summary (judge unavailable (jev_unavailable_fail_safe))`
 
@@ -50,6 +51,12 @@ There is **no forced compaction**: the plugin never requests a compaction of its
 decides what a compaction produces. Configure `minReductionRatio`, `preserveRecentMessages`,
 `threshold`, `trimHeadChars`, `maxStateTokens`, `maxRequestTokens` and `question` through the
 plugin's config (`/plugin` → lcc, or `claude plugin install --config key=value`).
+
+`rulesMode` (with `provider: rules`) picks `lossless`, `recoverable` or `lossy`; empty keeps the
+server default. With `recoverable` the hook sends the session's working directory as
+`workspace_root`, so every removed file read is checked against the file on disk. The
+directory is the event's `cwd` field when it is an absolute path, else the hook process's
+`process.cwd()` (function hooks run inside the session's process).
 
 ## Fallback is the default when anything is off
 
