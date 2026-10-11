@@ -1,5 +1,10 @@
 # MSI Sprint 0 — Current State (verified against code, 2026-10-02)
 
+> Snapshot as of 2026-10-02. Since then (2026-10-11): tool-call mode also accepts `laya` and the offline
+> `rules` provider (`lossless` default, `recoverable`, experimental `lossy`; PR #45), and block mode has a
+> `specialist` provider that runs shadow-only (ranks, never drops). Real-session results:
+> `docs/REAL_SESSION_BENCHMARKS.md`.
+
 > Rule: README claims separated from code. Status labels: implemented / experimental / planned / deprecated / research-only.
 
 ## 1. lcc (`/Users/Master/LCC`, v1.0.0, branch `fix/thread-safe-guard-and-laya-cache`, dirty)

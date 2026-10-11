@@ -89,9 +89,9 @@ runs requests concurrently.
 | answer missing / malformed / outside 0–1 | — | — | — | that call is kept and the reason is a warning (`jev_missing_answer:…`, `jev_answer_out_of_range:…`) |
 | nothing to score (all pinned) | `jev` | false | `none` | reason `no_candidates`; no call is claimed as judged |
 
-`mechanical` and `laya` are refused (exit 2) in this mode: "is this tool output still needed"
-is a semantic question, and a lexical scorer cannot answer it honestly. Use `--provider jev`
-(or `auto`, which prefers Jev).
+`mechanical` is refused (exit 2) in this mode: "is this tool output still needed"
+is a semantic question, and a lexical scorer cannot answer it honestly. Use `--provider jev`,
+`laya` (local judge), `auto` (prefers Jev), or `rules` (offline policy, below).
 
 ### Offline policy: `--provider rules`
 
@@ -148,6 +148,7 @@ The file-pointer check has two forms (`recoverability_check` in the report):
 Recommended config for live sessions: `provider: rules`, `rules_mode: recoverable`,
 `workspace_root` = the session's cwd (the Claude Code hook sends it), command pointers off.
 `lossless` stays the default `rules_mode`: it needs no disk and makes no recovery claim.
+What each mode measured on real agent sessions: [REAL_SESSION_BENCHMARKS.md](REAL_SESSION_BENCHMARKS.md).
 
 **`lossy` (EXPERIMENTAL)** — failed two session-disjoint blind audits (bench v0.4: 21/150
 decisions flagged; v0.5: 36/132), because its trims and drops remove output an agent may still
@@ -222,8 +223,8 @@ canonical row is in `benchmarks/research/RESEARCH_STATUS.md`. The largest sessio
 55.7–61.5% across four runs, and one of those runs dropped one evidence pair, which is why a
 pair only falls when *both* questions score low.
 
-- **Needs a judge.** No key means no pass: this mode keeps everything and says so. It has no
-  offline path by design.
+- **The Jev judge needs a key.** No key means no Jev pass: it keeps everything and says so.
+  The offline paths are `--provider laya` (local judge) and `--provider rules` (no model).
 - **Budgets are counted with the real tokenizer.** The state budget decides what the judge can
   see; an optimistic count builds requests the API refuses, so when no tokenizer is installed
   the heuristic is inflated by the measured factor instead of trusted. Real-session numbers and

@@ -86,8 +86,9 @@ It also skips `precompute` invocations, which install nothing.
   hook returns rebuilt messages rather than the engine's own objects. Claude Code rebuilds
   each returned message from `role`, `text` and tool blocks — which is why the hook refuses
   sessions carrying content it cannot rebuild.
-- **Needs a judge.** No key means no compaction: the plugin does not have, and does not fake,
-  an offline semantic path for tool-call relevance.
+- **The default provider needs a key.** With `provider: jev` and no key there is no
+  compaction. `provider: rules` runs offline with no model; it removes far less on real
+  sessions (see `docs/REAL_SESSION_BENCHMARKS.md`), so lower `minReductionRatio` to use it.
 - **Tool granularity.** A pair is kept, trimmed to its head, or dropped whole; a half-spent
   40K-char result is not half-summarized.
 

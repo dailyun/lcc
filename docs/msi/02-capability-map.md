@@ -5,7 +5,7 @@
 | Intent intake → readiness | LCC `src/lcc/intake/` | implemented | `parser.py: ReadinessState` ×4, pipeline composes |
 | Portable intake spec/installer | agentic-prompt-intake | existing, duplicated | v0.4.0, 3 states, no BLOCKED; LCC is superset |
 | Deterministic clean/dedupe/budget | LCC core | implemented | `cleaning/`, `token_budget/`, 283+ tests |
-| Relevance compaction (verbatim) | LCC `relevance/` | implemented | mechanical/laya/jev, trim, decisions cache |
+| Relevance compaction (verbatim) | LCC `relevance/` | implemented | blocks: mechanical/laya/jev + specialist (shadow, never drops); tool calls: jev/laya/rules (2026-10-11, see `docs/REAL_SESSION_BENCHMARKS.md`); trim, decisions cache |
 | Context IR | LCC | **design** (missing) | graph.py edges + 1.2 report exist; no versioned schema |
 | Sufficiency (structural) | LCC `sufficiency.py` | implemented | dependency guard, fail-closed |
 | Sufficiency (semantic) | LCC `verifier.py` | experimental | PASS/REVIEW/FAIL, FAIL band unobserved |
