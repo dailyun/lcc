@@ -1,5 +1,6 @@
 """Show exactly which categorized item each arm loses, per scale."""
 
+import gzip
 import importlib.util
 import json
 import pathlib
@@ -12,7 +13,8 @@ m = importlib.util.module_from_spec(spec)
 sys.modules["_rm"] = m
 spec.loader.exec_module(m)
 
-rows = [json.loads(line) for line in pathlib.Path("results/matrix.jsonl").read_text().splitlines()]
+raw = gzip.decompress(pathlib.Path("results/matrix.jsonl.gz").read_bytes()).decode("utf-8")
+rows = [json.loads(line) for line in raw.splitlines()]
 index = json.loads(pathlib.Path("corpora/index.json").read_text())
 
 print(f"{'arm':24} {'escala':7} {'categoria perdida':22} marcador")
