@@ -10,11 +10,12 @@ count, never a heuristic -- what a downstream model would actually receive:
   distractor_leak          noisy non-evidence blocks that survived (should be 0 or harmless)
   artifacts                files each arm produced (prompt / report / structured output)
 
-Writes results/matrix.jsonl (one row per corpus x arm) and prints a compact table.
+Writes results/matrix.jsonl.gz (one row per corpus x arm) and prints a compact table.
 """
 
 from __future__ import annotations
 
+import gzip
 import json
 import pathlib
 import re
@@ -202,10 +203,11 @@ def main() -> None:
                 f"leak={row.get('distractor_leak', 0):3} {row['wall_ms']:5}ms"
                 + (f" ERR={row.get('error','')[:60]}" if row.get("error") else "")
             )
-    (OUT / "matrix.jsonl").write_text(
-        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows), encoding="utf-8"
-    )
-    print(f"\nwrote {len(rows)} rows -> {OUT / 'matrix.jsonl'}")
+    # Gzipped: each row carries full arm outputs (16 MB raw, ~300 KB compressed).
+    # mtime=0 keeps the bytes identical for identical rows, so git only sees real changes.
+    body = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows).encode("utf-8")
+    (OUT / "matrix.jsonl.gz").write_bytes(gzip.compress(body, mtime=0))
+    print(f"\nwrote {len(rows)} rows -> {OUT / 'matrix.jsonl.gz'}")
     _print_category_table(rows)
 
 

@@ -42,6 +42,14 @@ All notable changes to this project are documented here. The format is based on
 
 ### Changed
 
+- `benchmarks/research/results/matrix.jsonl` (16.9 MB) is now committed as
+  `matrix.jsonl.gz` (227 KB). The file decompresses to the same bytes, `run_matrix.py`
+  writes it with `mtime=0` so identical rows produce identical bytes, and
+  `show_losses.py` reads it. The old file stays in git history.
+- Package metadata names the author: Lucas Martins <lucas@lookadev.com>.
+- New `Dependency audit` workflow: `pip-audit` runs weekly and on demand. It is not run on
+  PRs, so an advisory published against a dependency does not block unrelated merges.
+
 - Removed `act2_router/`, which held 17 star re-exports of `lcc.router` and `lcc.agents`
   and was never in the wheel. The 7 tests that still used it now import the real modules.
 - The supersession cue list is defined once in `graph.SUPERSESSION_CUES`, and the graph

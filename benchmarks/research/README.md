@@ -9,7 +9,7 @@ Reproduce with:
 ```bash
 export TIKTOKEN_CACHE_DIR="$HOME/.cache/tiktoken"   # see Finding 1
 python3 make_corpora.py     # deterministic corpora -> corpora/
-python3 run_matrix.py       # 3 corpora x 13 arms   -> results/matrix.jsonl
+python3 run_matrix.py       # 3 corpora x 13 arms   -> results/matrix.jsonl.gz
 python3 run_cache.py        # cache-safety suite    -> results/cache_safety.json
 python3 make_payloads.py    # agent A/B payloads    -> payloads/
 python3 score_agents.py     # agent A/B scoring     -> results/agent_ab.json
@@ -26,7 +26,7 @@ against the committed corpora. If you want to check a claim rather than trust it
 
 | what to check | how |
 |---|---|
-| the study's numbers | run `run_matrix.py`, diff `results/matrix.jsonl` against your run |
+| the study's numbers | run `run_matrix.py`, diff against the committed run: `zdiff results/matrix.jsonl.gz <(git show HEAD:benchmarks/research/results/matrix.jsonl.gz)` |
 | the corpora are what the generator says | `pytest tests/test_benchmark_categories.py` asserts it, item by item |
 | the ground truth actually measures something | that test also asserts every marker matches its own block, and every item is above the 80-char scoring floor |
 | a claim about quality, not tokens | `run_adversarial.py` prints one row per hazard with the assertions it checked |
