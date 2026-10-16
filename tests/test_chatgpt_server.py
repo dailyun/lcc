@@ -383,3 +383,17 @@ def test_anonymous_caller_may_use_the_offline_rules_policy(mcp_url, monkeypatch)
     assert status == 200
     result = _sse_payload(body)
     assert "error" not in result and result["result"].get("isError") is not True
+
+
+def test_stash_is_stdio_only(mcp_url):
+    """recall and rules_mode 'stashed' touch the server's disk: refused over HTTP."""
+    for params in (
+        {"name": "recall", "arguments": {"id": "0" * 12}},
+        {"name": "compact_transcript", "arguments": {
+            "messages": [{"role": "user", "text": "x"}], "question": "q",
+            "provider": "rules", "rules_mode": "stashed"}},
+    ):
+        status, body = _post(mcp_url, {"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                                        "params": params})
+        assert status == 200
+        assert "only served over stdio" in _sse_payload(body)["error"]["message"]

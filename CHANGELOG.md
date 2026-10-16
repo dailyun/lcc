@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **`rules_mode: "stashed"` and `lcc recall`.** Tool-call compaction can now remove what
+  `lossy` drops or trims and what `recoverable` replaces without losing it: the exact bytes go
+  to a local content-addressed stash (`~/.cache/lcc/stash`, `0700`/`0600`, `LCC_STASH_DIR`)
+  and the result becomes `[removed: N tokens · lcc recall <sha12>]`. `lcc recall` and the MCP
+  tool `recall` re-hash on read. stdio only; `lcc mcp --http` refuses it. `lossless` stays
+  the default. Not benchmarked yet.
+
 ### Security
 
 - **The TypeSafe bearer key could leave over plain HTTP or follow a redirect.**

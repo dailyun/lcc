@@ -30,6 +30,7 @@ def test_tools_registered():
         "prepare",
         "explain",
         "intake",
+        "recall",
     }
     for name, spec in TOOLS.items():
         assert spec["description"] and spec["schema"].get("type") == "object", name
@@ -52,6 +53,7 @@ def test_tools_list_shape():
         "inspect",
         "prepare",
         "explain",
+        "recall",
         "intake",
     ]
     for tool in resp["result"]["tools"]:
@@ -316,7 +318,7 @@ def test_stdio_end_to_end_offline():
     # 1 notification -> no response: 3 responses for 4 messages.
     assert [r["id"] for r in responses] == [1, 2, 3]
     assert responses[0]["result"]["serverInfo"]["name"] == "lcc"
-    assert len(responses[1]["result"]["tools"]) == 6
+    assert len(responses[1]["result"]["tools"]) == 7
     payload = json.loads(responses[2]["result"]["content"][0]["text"])
     assert payload["report"]["provider_used"] == "mechanical"
 

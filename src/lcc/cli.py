@@ -1830,6 +1830,24 @@ def explain_cmd(
     sys.stdout.write(rendered + "\n")
 
 
+@app.command(name="recall")
+def recall_cmd(
+    stash_id: str = typer.Argument(
+        ..., help="The id after 'lcc recall' in a stashed pointer (12-64 hex chars).",
+        show_default=False,
+    ),
+    lines: str | None = typer.Option(None, "--lines", help="Only lines a-b (1-based)."),
+) -> None:
+    """Print a tool output that `rules_mode="stashed"` removed, after re-checking its hash."""
+    from lcc.relevance.transcript_stash import StashError, parse_lines, recall
+
+    try:
+        text = recall(stash_id, parse_lines(lines) if lines else None)
+    except StashError as exc:
+        _fail(str(exc), code=2)
+    sys.stdout.write(text)
+
+
 @app.command(name="intake")
 def intake_cmd(
     input_source: str = typer.Argument(
