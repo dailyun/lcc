@@ -36,9 +36,10 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir plugins/claude-code
 | `.claude-plugin/marketplace.json` | the marketplace this repository hosts (name `lcc`) |
 | `plugins/claude-code/.claude-plugin/plugin.json` | the plugin manifest and its configurable options |
 | `plugins/claude-code/.mcp.json` | starts the plugin's own `lcc mcp` server |
-| `plugins/claude-code/hooks/hooks.json` | registers the hook module |
+| `plugins/claude-code/hooks/hooks.json` | registers the hook module and the two classic hooks |
 | `plugins/claude-code/hooks/lcc-compact.mjs` | the adapter: `session.compact` → `compact_transcript` → messages |
 | `plugins/claude-code/hooks/map.mjs` | the pure mapping helpers, unit-tested on their own |
+| `plugins/claude-code/scripts/lcc-pin.mjs` | the classic-hook fallback: `PreCompact` instructions and `SessionStart` (`compact`) re-pin |
 | `plugins/claude-code/hooks/README.md` | operator guide: what runs, what falls back, what is limited |
 
 The hook is plain ESM with no build step and no dependencies: the Python package does the
@@ -59,6 +60,21 @@ Set through `/plugin` → lcc, or `claude plugin install lcc@lcc --config key=va
 | `maxRequestTokens` (`30000`) | ceiling for state plus one batch of questions per request |
 | `minReductionRatio` (`0.25`) | below this share removed, the plugin keeps the built-in summary |
 | `server` (`lcc`) | MCP server name to call |
+
+## Without the early-access flag or a key: pinned facts in the built-in summary
+
+Two classic hooks ship in the same `hooks/hooks.json` and run on any Claude Code with plugin
+hooks, with no `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS`, no judge key and no network:
+
+| Hook | What it adds |
+| :--- | :--- |
+| `PreCompact` | stdout becomes extra instructions for the built-in summary: the session objective (the two newest user prompts), the files edited and read, and the last tool error, with the order to copy file paths, identifiers and error text verbatim |
+| `SessionStart`, matcher `compact` | the same facts, injected into the fresh context after the summary |
+
+Both read the facts from the hook's `transcript_path` (the session JSONL, which compaction
+appends to and does not rewrite), so they agree and nothing is stored between them. Lists are
+capped at 20 files and the error at 400 characters. Anything unreadable prints nothing and exits
+0, so compaction runs exactly as before. Covered by `node test/hook-pin.test.mjs`.
 
 ## Fallback: the built-in summary runs whenever anything is off
 
@@ -103,7 +119,9 @@ backends only, and one of four runs dropped an evidence pair on the largest sess
 And it is measured on **real transcripts** (`benchmarks/research/REAL_SESSIONS.md`): a real
 Claude Code session in this repository, in the exact shape the hook receives, went from 55 411
 to 18 761 tokens (**−66.1%**) with all 42 user/assistant texts preserved byte for byte, and this
-release's own 337-message Hermes session by 81.7% with all 58 texts preserved. That measurement
+release's own 337-message Hermes session by 81.7% with all 58 texts preserved. That is **n=2**;
+on 60 real Claude Code contexts Jev block mode cut 3.5%
+([real-session benchmarks, section 3](REAL_SESSION_BENCHMARKS.md#3-against-jev-laya-and-mechanical)). That measurement
 found and fixed a real defect: the state budget used a heuristic that undercounts JSON by about
 a third, so large sessions built requests the API refused (`400 max_tokens_exceeded`) and
 degraded to keep-everything after 38 wasted calls. It also exercised the 25% minimum-reduction

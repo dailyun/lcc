@@ -35,11 +35,16 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir plugins/claude-code
 
 ## What runs, and when
 
-The plugin registers one hook:
+The plugin registers one function hook and two classic hooks:
 
 | Event | What it does |
 | :--- | :--- |
 | `session.compact` | Sends the transcript to `compact_transcript`, replaces the conversation with the compacted one when the pass was judged and removed something, otherwise calls `next(event)` so Claude Code's own summary runs |
+| `PreCompact` (classic) | Prints the session objective, edited/read files and the last tool error, asking the built-in summary to keep them verbatim (`scripts/lcc-pin.mjs precompact`) |
+| `SessionStart`, matcher `compact` (classic) | Re-pins the same facts after the summary (`scripts/lcc-pin.mjs sessionstart`) |
+
+The two classic hooks need neither the function-hook flag nor a key: without the flag they are
+the whole plugin, and the built-in summary keeps paths, identifiers and the last error verbatim.
 
 Every outcome is reported in one toast and one log line, and each per-call decision is in
 the report the tool returns:
@@ -103,5 +108,6 @@ It also skips `precompute` invocations, which install nothing.
 
 ```bash
 node test/hook-map.test.mjs        # the mapping helpers, no engine needed
+node test/hook-pin.test.mjs        # the PreCompact / SessionStart fallback
 claude plugin validate plugins/claude-code
 ```

@@ -1,3 +1,20 @@
 {
-  "modules": ["./lcc-compact.mjs"]
+  "modules": ["./lcc-compact.mjs"],
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/lcc-pin.mjs\" precompact", "timeout": 10 }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/lcc-pin.mjs\" sessionstart", "timeout": 10 }
+        ]
+      }
+    ]
+  }
 }
