@@ -86,11 +86,15 @@ It also skips `precompute` invocations, which install nothing.
 
 ## Limitations, stated plainly
 
-- **Never fired by an editor yet.** The manifest validates, the plugin installs from the
-  marketplace, and the mapping logic is unit-tested — but no `/compact` in a real Claude Code
-  session has been intercepted, because the author does not have a Claude Code subscription. If
-  you have Claude Code 2.1.274+ and a TypeSafe key, you are the first person who can close that
-  gap; the whole test is `/compact` in a long session plus reading the toast.
+- **Fired end to end on one session shape.** Claude Code 2.1.296 ran a real `/compact` through
+  this hook; it needed three fixes first (no `process` in the hook worker, the server name
+  `plugin:lcc:lcc`, `isError` on rebuilt results). Counts are in
+  [`docs/CLAUDE_CODE.md`](../../../docs/CLAUDE_CODE.md#observed-end-to-end-claude-code-21296-2026-10-16).
+- **No native re-attachments after a replacement.** When the hook's messages stand, Claude Code
+  does not re-read recent files or re-announce tools, MCP instructions or the environment, and
+  `PreCompact` does not run. Only `SessionStart` hooks (including `lcc`'s re-pin) run.
+- **Permission.** `$.mcp.call` is permission-checked: allow
+  `mcp__plugin_lcc_lcc__compact_transcript`, or every compaction falls back to the summary.
 - **Early access surface.** Function hooks (`hooks/hooks.json` modules, `session.compact`)
   require `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` and Claude Code 2.1.274+; the API may change
   between releases. The hook is written in plain ESM (`.mjs`), no build step, no dependencies.

@@ -30,7 +30,7 @@ const TRANSCRIPT = [
 
 test("resolveOptions keeps the documented defaults", () => {
   const options = resolveOptions();
-  assert.equal(options.server, "lcc");
+  assert.equal(options.server, "plugin:lcc:lcc");
   assert.equal(options.threshold, 0.5);
   assert.equal(options.preserveRecentMessages, 6);
   assert.equal(options.minReductionRatio, 0.25);
@@ -218,6 +218,14 @@ test("toSessionMessages returns exactly what the engine rebuilds from", () => {
   ]);
   assert.deepEqual(rebuilt[0], { role: "user", text: "hi", toolUses: [] });
   assert.deepEqual(rebuilt[1].toolResults, [{ tool_use_id: "toolu_1", text: "out" }]);
+});
+
+test("toSessionMessages keeps a failed tool result failed", () => {
+  // Observed on Claude Code 2.1.296: an `is_error` result came back as a success.
+  const [message] = toSessionMessages([
+    { role: "user", text: "", toolResults: [{ tool_use_id: "t", text: "boom", is_error: true }] },
+  ]);
+  assert.deepEqual(message.toolResults, [{ tool_use_id: "t", text: "boom", isError: true }]);
 });
 
 let failed = 0;

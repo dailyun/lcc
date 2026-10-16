@@ -14,8 +14,8 @@
     "server": {
       "type": "string",
       "title": "MCP server name",
-      "description": "Name of the lcc MCP server as /mcp lists it. The plugin ships its own via .mcp.json.",
-      "default": "lcc"
+      "description": "Name of the lcc MCP server as /mcp lists it. The plugin ships its own via .mcp.json, which Claude Code names plugin:lcc:lcc.",
+      "default": "plugin:lcc:lcc"
     },
     "question": {
       "type": "string",

@@ -32,11 +32,13 @@ function message(error) {
 
 /**
  * The session's working directory, which becomes `workspace_root` for rules_mode recoverable.
- * Preferred: `event.cwd`, the absolute cwd Claude Code puts on every hook event. Fallback:
- * `process.cwd()`, because function hooks run inside the session's own process.
+ * Preferred: `event.cwd` when it is absolute. Fallback: `process.cwd()` when there is a
+ * `process`. Claude Code 2.1.296 runs hook modules in a worker with no `process` and puts no
+ * `cwd` on `session.compact`, so there this is undefined and no workspace_root is sent.
  */
 export function sessionCwd(event) {
-  return typeof event?.cwd === "string" && event.cwd.startsWith("/") ? event.cwd : process.cwd();
+  if (typeof event?.cwd === "string" && event.cwd.startsWith("/")) return event.cwd;
+  return globalThis.process?.cwd?.();
 }
 
 /** @type {import('claude-code').Register} */

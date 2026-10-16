@@ -19,6 +19,10 @@ claude plugin marketplace add lucasmartins-ai/lcc
 claude plugin install lcc@lcc
 ```
 
+The hook reaches its server through `$.mcp.call`, which goes through tool permissions: allow
+`mcp__plugin_lcc_lcc__compact_transcript` (in `permissions.allow`, or answer the prompt), or the
+call is refused and the built-in summary runs.
+
 Requirements: Claude Code **2.1.274 or newer** and `lcc` on `PATH`. The default judge
 (`provider: auto`, i.e. `specialist-v3`) runs locally with no key and no network
 ([details](SPECIALIST.md)). `provider: rules` is the offline deterministic policy. Jev is
@@ -59,7 +63,7 @@ Set through `/plugin` → lcc, or `claude plugin install lcc@lcc --config key=va
 | `maxStateTokens` (`25000`) | token ceiling for the conversation shown to the judge |
 | `maxRequestTokens` (`30000`) | ceiling for state plus one batch of questions per request |
 | `minReductionRatio` (`0.25`) | below this share removed, the plugin keeps the built-in summary |
-| `server` (`lcc`) | MCP server name to call |
+| `server` (`plugin:lcc:lcc`) | MCP server name to call, as Claude Code names the plugin's own |
 
 ## Without the early-access flag or a key: pinned facts in the built-in summary
 
@@ -99,15 +103,14 @@ from this repository's marketplace with the documented commands (`claude plugin 
 user scope with its eight `userConfig` options reported), and `claude plugin details lcc` lists
 the plugin's MCP server. The hook's mapping logic — option coercion, transcript mapping,
 tool-result parsing, the replacement decision and the fallback on unsupported content — is
-covered by `node test/hook-map.test.mjs` (10 cases, run by `npm test` and by CI); the Python side
+covered by `node test/hook-map.test.mjs` (15 cases, run by `npm test` and by CI); the Python side
 is covered by `tests/test_transcript_compaction.py`, `tests/test_cli_tool_calls.py` and
 `tests/test_mcp_server.py`.
 
-> **`claude plugin details` reports "Hooks (0)" for this plugin, and that is the inventory
-> counter, not the truth.** Function-hook modules (`hooks/hooks.json` with `"modules"`) are the
-> early-access surface: `claude plugin validate` parses the module and names the event it
-> registers, while the component inventory counts only classic event hooks. Do not read
-> "Hooks (0)" as a missing hook.
+> **`claude plugin details` counts only classic event hooks**, not the `session.compact`
+> module (it reported "Hooks (0)" before the two fallback hooks existed). `claude plugin
+> validate` parses the module and names the event it registers; the debug log shows
+> `hooks module lcc@... loaded ... events: session.compact` at startup.
 
 The compaction backend itself is now measured against the reference implementation on the same
 transcripts: our mode removed **13.3 / 39.2 / 55.7%** of the transcript at fact recall
@@ -127,17 +130,49 @@ a third, so large sessions built requests the API refused (`400 max_tokens_excee
 degraded to keep-everything after 38 wasted calls. It also exercised the 25% minimum-reduction
 gate for real: one measured window landed below it and the hook would keep the built-in summary.
 
-Not verified: Claude Code's own `/compact` has never been intercepted end to end. The hook's
-plumbing (`session.compact` → `$.mcp.call` → messages back) is validated and unit-tested, but not
-yet fired by the editor: **the author does not have a Claude Code subscription**, so this
-repository cannot run that last step. The two-minute check for anyone who does — Claude Code
-2.1.274 or newer, and a TypeSafe key:
+### Observed end to end (Claude Code 2.1.296, 2026-10-16)
+
+The first real `/compact` runs through this plugin, from `claude -p` on a throwaway session
+(one synthetic workspace: 4 file reads of about 6.5K characters each, 2 Bash calls, 1 Edit,
+1 Grep). Counts only; one session shape, so read them as a smoke test, not a benchmark.
+
+What the shipped hook did on the first run, and what was fixed:
+
+| Run | Observed | Fix in this branch |
+| :--- | :--- | :--- |
+| 1 | `session.compact` fired (trigger `manual`, 16 messages, keys `role`, `text`, `toolUses`, `toolResults`, `handle`) and the hook threw `ReferenceError: process is not defined`: hook modules run in a worker with no `process`, and the event carries no `cwd`. The engine skipped the hook and its own summary ran. | `sessionCwd()` uses `globalThis.process?.cwd?.()`; no `workspace_root` is sent when there is none |
+| 2 | `$.mcp.call` found no server named `lcc`: Claude Code names the plugin's server `plugin:lcc:lcc` | default `server` is `plugin:lcc:lcc` (manifest and `map.mjs`) |
+| 3 | the call was refused until `mcp__plugin_lcc_lcc__compact_transcript` was allowed (`$.mcp.call` goes through tool permissions; headless `-p` cannot prompt) | documented below; allow it once |
+| 4 | replacement accepted (receipt below), but a failed tool result came back as a success: the engine rebuilds `is_error` from `isError`, the payload said `is_error` | `toSessionMessages` emits `isError`; after the fix the run kept 1 of 1 error flags |
+
+The receipt of the first accepted replacement (default provider `jev`; `lcc` found its key in
+its own key store): judged by `jev-1.13.0`, 1 call, 329 ms, not degraded; 7 tool calls → 1 kept,
+2 trimmed, 3 dropped; 29,039 → 2,845 characters (−90.2%); 20 messages in, 11 out. Claude Code
+logged `a hook's 11 messages stand ... core never ran`, and the `compact_boundary` recorded
+58,429 → 2,324 tokens in 482 ms, against 15–17 s for the built-in summary on the same session
+shape. Two runs of the plugin directory from this branch kept 12 and 10 messages.
+
+**Claude Code's post-compact re-attachments do not happen when the hook replaces messages.**
+After the boundary, the hook path had 0 re-read files and 0 tool/agent/MCP/environment/model
+deltas; only the 3 `SessionStart` hook outputs. The built-in path on the same session had 4
+re-read files, 5 deltas (deferred tools, agent listing, MCP instructions, environment, model)
+and the hook outputs. `PreCompact` does not run on the hook path (0 invocations) and does run on
+the built-in path. Kept messages are verbatim, so a kept file read is still in context; a
+dropped or trimmed one is not re-attached, and `lcc`'s `SessionStart` re-pin lists its path.
+
+Two more observations: the hook module loaded with `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` unset
+and with it set to `0` on this 2.1.296 install, so the variable was not the gate here (it may
+be on other accounts or builds). And the classic fallback changed the built-in summary: with
+the `PreCompact` pin it carried 4 of the 4 absolute file paths, without the plugin 0 of 4
+(n=1 each; both kept the edited function name and the error text).
+
+To repeat it:
 
 ```bash
-cd <this repo> && CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir plugins/claude-code
-# in a long session:  /compact
-# expect the toast: "lcc: verbatim compaction, no summary (kept N messages, dropped D tool call(s), trimmed T)"
-# or, when the pass lands below the minimum: "lcc: built-in summary (below the 25% minimum (x%))"
+cd <a throwaway repo> && CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir <lcc>/plugins/claude-code \
+  --allowedTools mcp__plugin_lcc_lcc__compact_transcript --debug-file /tmp/lcc-compact.log
+# after a few tool calls:  /compact
+grep -E "\[lcc\]|session\.compact \(" /tmp/lcc-compact.log
 ```
 
 Note that Claude Code is a *consumer*, not a requirement: the same pass runs from the CLI
