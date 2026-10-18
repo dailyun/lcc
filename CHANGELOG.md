@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **`provider="specialist-v3"`: a local block ranker for agent transcripts.** A frozen
+  LR + boosted-tree model (183 KB, plain Python, no new dependency) ranks blocks and drops the
+  lowest-ranked until `specialist_drop_fraction` (default 0.3) of candidate characters is gone.
+  LCC's protection rules run first, and deterministic-protection and high-risk blocks are never
+  dropped. Block metadata (message index, role, kind, tool) comes from trusted
+  `segments` (`render_transcript`), never from text. `auto` uses it instead of mechanical
+  when Jev is unavailable and segments are given; plain text keeps the mechanical fallback.
+  The model's sha256 is checked at load, and a mismatch falls back to mechanical. Held-out results and
+  limits: [docs/SPECIALIST.md](docs/SPECIALIST.md).
+
 ### Security
 
 - **The TypeSafe bearer key could leave over plain HTTP or follow a redirect.**

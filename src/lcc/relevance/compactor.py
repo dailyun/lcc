@@ -26,9 +26,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import math
 import re
 import threading
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -54,6 +57,14 @@ from lcc.relevance.decisions import (
 from lcc.relevance.graph import SUPERSESSION_CUES, build_graph
 from lcc.relevance.jev import JevClient, JevError, parse_noul_answer
 from lcc.relevance.laya import DEFAULT_LAYA_MODEL
+from lcc.relevance.specialist import (
+    SPECIALIST_PROVIDER,
+    BlockSegment,
+    SpecialistJudge,
+    SpecialistModelError,
+    load_judge,
+    meta_for_blocks,
+)
 from lcc.relevance.sufficiency import verify_sufficiency
 from lcc.relevance.trim import TRIM_POLICY_VERSION, detect_content_type, trim_block_safe
 from lcc.relevance.verifier import VERIFIER_POLICY_VERSION
@@ -75,6 +86,8 @@ _DEFAULT_MAX_STATE_CHARS = 12000
 _DEFAULT_TRIM_HEAD_CHARS = 300
 _DEFAULT_MAX_WORKERS = 4
 _DEFAULT_MIN_REDUCTION = 0.25
+_DEFAULT_SPECIALIST_DROP_FRACTION = 0.3
+LOGGER = logging.getLogger("lcc.relevance")
 _SCORE_CLIP_HEAD = 4000
 _SCORE_CLIP_TAIL = 1100
 
@@ -144,7 +157,8 @@ class RelevanceCompactionRequest:
     #: scoring. On by default, because the local scorer is a fallback and a fallback should
     #: err toward keeping evidence.
     deterministic_protection: bool = True
-    provider: str = "auto"  # auto | jev | laya | mechanical | specialist (shadow)
+    #: auto | jev | laya | mechanical | specialist-v3 | specialist (shadow, injected client)
+    provider: str = "auto"
     model: str = "gpt-4.1"  # token counting model (ADR 0005 honesty contract)
     jev_model: str = "jev-latest"
     laya_model: str = DEFAULT_LAYA_MODEL
@@ -195,6 +209,13 @@ class RelevanceCompactionRequest:
     #: Collection timestamp for IR unit provenance (RFC3339). ``None`` resolves
     #: to the deterministic default so emission stays byte-stable.
     ir_collected_at: str | None = None
+    #: Trusted block metadata for ``specialist-v3`` (see ``lcc.relevance.specialist``): one
+    #: segment per rendered content part, from :func:`render_transcript`. When present and
+    #: Jev is unavailable, ``auto`` falls back to ``specialist-v3`` instead of mechanical.
+    segments: tuple[BlockSegment, ...] | None = None
+    #: ``specialist-v3`` is a ranker: it drops its lowest-ranked candidate blocks until this
+    #: share of candidate characters is removed. Protected blocks never count as candidates.
+    specialist_drop_fraction: float = _DEFAULT_SPECIALIST_DROP_FRACTION
 
 
 @dataclass(frozen=True)
@@ -1123,10 +1144,54 @@ def _score_mechanically(
     return results
 
 
+def _load_specialist(warnings: list[str]) -> SpecialistJudge | None:
+    """The packaged specialist model, or ``None`` (fail closed to mechanical) with a warning."""
+    try:
+        return load_judge()
+    except SpecialistModelError as exc:
+        LOGGER.warning("specialist-v3 unavailable, using mechanical scoring: %s", exc)
+        warnings.append(f"specialist_v3_unavailable: {exc}; fell back to mechanical scoring")
+        return None
+
+
+def _specialist_drop_texts(
+    pending: list[TextBlock],
+    scores: dict[str, float],
+    protection: dict[str, str | None],
+    fraction: float,
+) -> set[str]:
+    """Texts to drop: lowest score first (ties: older first) until ``fraction`` of the
+    candidate characters is removed. Protected and high-risk blocks are never picked, and
+    identical texts share one decision (the first copy's score)."""
+    total = sum(len(block.text) for block in pending)
+    copies = Counter(block.text for block in pending)
+    first: dict[str, TextBlock] = {}
+    for block in pending:
+        first.setdefault(block.text, block)
+    droppable = [
+        block
+        for block in first.values()
+        if protection.get(block.id) is None and detect_content_type(block.text) != "high_risk"
+    ]
+    droppable.sort(key=lambda block: (scores[block.id], block.index))
+    need, removed, out = total * fraction, 0, set()
+    for block in droppable:
+        if removed >= need:
+            break
+        out.add(block.text)
+        removed += len(block.text) * copies[block.text]
+    return out
+
+
 def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionResult:
     """Run an opt-in relevance compaction pass over ``request.text``."""
     started_total = time.perf_counter()
     warnings: list[str] = []
+    if request.provider == SPECIALIST_PROVIDER and request.decisions_cache_path is not None:
+        # Ranks depend on the whole context, so a content-keyed sticky decision would lie.
+        raise ValueError("specialist-v3 ranks the whole context; it does not use a decision cache")
+    if not 0.0 <= request.specialist_drop_fraction < 1.0:
+        raise ValueError("specialist_drop_fraction must be in [0, 1)")
     if request.provider == "specialist":
         if request.decisions_cache_path is not None:
             raise ValueError(
@@ -1364,7 +1429,11 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
     degradation_reason: str | None = None
     # Mechanical passes never perform semantic judgment, even when protection
     # or cached decisions leave no pending blocks to score.
-    semantic_guarantee = "none" if provider_requested in ("mechanical", "specialist") else "judged"
+    semantic_guarantee = (
+        "none"
+        if provider_requested in ("mechanical", "specialist", SPECIALIST_PROVIDER)
+        else "judged"
+    )
     calls = 0
     latency_ms = 0
     jev_resolved: str | None = None
@@ -1372,6 +1441,9 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
     context_budget_used: int | None = None
     specialist_ranking: dict[str, Any] | None = None
     client: Any | None = None
+    specialist_judge: SpecialistJudge | None = None
+    specialist_drop: set[str] = set()
+    specialist_fallback_to_mechanical = False
     laya_fallback_to_mechanical = False
     nimble_fallback_to_mechanical = False
     if provider_requested in ("auto", "jev"):
@@ -1387,12 +1459,23 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
                 )
             else:
                 degraded = True
-                degradation_reason = "jev_unavailable_mechanical_fallback"
                 semantic_guarantee = "none"
-                warnings.append(
-                    "jev_unavailable: fell back to mechanical scoring; semantic judgment is "
-                    "unavailable (degraded)"
-                )
+                # With trusted block metadata the local default is the specialist ranker;
+                # plain text (no metadata) keeps the mechanical fallback it always had.
+                if request.segments is not None and request.decisions_cache_path is None:
+                    specialist_judge = _load_specialist(warnings)
+                if specialist_judge is not None:
+                    degradation_reason = "jev_unavailable_specialist_fallback"
+                    warnings.append(
+                        "jev_unavailable: fell back to the local specialist-v3 ranker; semantic "
+                        "judgment is unavailable (degraded)"
+                    )
+                else:
+                    degradation_reason = "jev_unavailable_mechanical_fallback"
+                    warnings.append(
+                        "jev_unavailable: fell back to mechanical scoring; semantic judgment is "
+                        "unavailable (degraded)"
+                    )
         elif request.jev_model and hasattr(client, "model"):
             client.model = request.jev_model
     elif provider_requested == "laya":
@@ -1429,6 +1512,17 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
             provider_used = "degraded"
             degradation_reason = "specialist_unavailable"
             warnings.append("specialist_unavailable: kept every block; no lexical drop fallback")
+    elif provider_requested == SPECIALIST_PROVIDER:
+        specialist_judge = _load_specialist(warnings)
+        if specialist_judge is None:
+            degraded = True
+            specialist_fallback_to_mechanical = True
+            degradation_reason = "specialist_v3_unavailable_mechanical_fallback"
+        elif request.segments is None:
+            warnings.append(
+                "specialist_v3_no_block_metadata: no segments given, so every block has unknown "
+                "role/kind/tool; this is outside what the model was trained on"
+            )
     elif provider_requested == "nimble":
         # No Nimble scorer in-tree (in-flight CLI surface only): honest
         # mechanical fallback, degraded=True, never a fake `judged`.
@@ -1562,12 +1656,61 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
                         semantic_guarantee = "partial"
                     else:
                         semantic_guarantee = "none"
+        elif specialist_judge is not None:
+            provider_used = SPECIALIST_PROVIDER
+            started_ranking = time.perf_counter()
+            # Score the whole context in order (positions and neighbours are features), then
+            # decide only for the blocks LCC already allows to drop.
+            try:
+                meta = meta_for_blocks(
+                    [(block.character_start, block.character_end) for block in blocks],
+                    request.segments,
+                )
+                raw = specialist_judge.score(
+                    request.question, [block.text for block in blocks], meta
+                )
+                raw_by_id = {block.id: value for block, value in zip(blocks, raw, strict=True)}
+            except Exception as exc:  # a ranker failure must never break compaction
+                LOGGER.warning("specialist-v3 ranking failed, using mechanical scoring: %r", exc)
+                provider_used = "specialist-v3+mechanical_fallback"
+                degraded = True
+                degradation_reason = "specialist_v3_ranking_failed_mechanical_fallback"
+                warnings.append(
+                    f"specialist_v3_ranking_failed: {type(exc).__name__}; "
+                    "fell back to mechanical scoring"
+                )
+                for block_id, (s, src, prot) in _score_mechanically(
+                    pending,
+                    request.question,
+                    protect=request.deterministic_protection,
+                    question_language=question_language,
+                ).items():
+                    results[block_id] = (s, src, prot, None)
+            else:
+                guarded = {
+                    block.id: (
+                        _deterministic_protection(block.text, question_language)
+                        if request.deterministic_protection
+                        else None
+                    )
+                    for block in pending
+                }
+                specialist_drop = _specialist_drop_texts(
+                    pending, raw_by_id, guarded, request.specialist_drop_fraction
+                )
+                for block in pending:
+                    # Logistic squash for the report only: monotone in rank, not a probability.
+                    squashed = round(1.0 / (1.0 + math.exp(-raw_by_id[block.id])), 4)
+                    results[block.id] = (squashed, SPECIALIST_PROVIDER, guarded[block.id], None)
+            latency_ms = round((time.perf_counter() - started_ranking) * 1000)
         else:
             # Pure mechanical, or honest Laya→mechanical fallback when the extra
             # is missing. Scoring is identical; only the label + degraded flag
             # differ so callers can tell "asked laya, got lexical" from "asked lexical".
             if laya_fallback_to_mechanical:
                 provider_used = "laya+mechanical_fallback"
+            elif specialist_fallback_to_mechanical:
+                provider_used = "specialist-v3+mechanical_fallback"
             elif nimble_fallback_to_mechanical:
                 provider_used = "nimble+mechanical_fallback"
             else:
@@ -1604,6 +1747,16 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
                 # score stays as measured so the report shows both halves of that.
                 decision_kind = "keep"
                 reason = protection
+            elif source == SPECIALIST_PROVIDER:
+                if ctype == "high_risk":
+                    decision_kind = "keep"
+                    reason = "high_risk_conservative_retention"
+                elif block.text in specialist_drop:
+                    decision_kind = "drop"
+                    reason = "specialist_rank_below_budget"
+                else:
+                    decision_kind = "keep"
+                    reason = "specialist_rank_kept"
             elif source in ("jev", "laya"):
                 if decision_score >= request.threshold:
                     decision_kind = "keep"
