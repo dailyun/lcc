@@ -11,6 +11,7 @@ framing is also accepted):
 - ``prepare`` — inspect-first deterministic prompt preparation (offline)
 - ``explain`` — audit a compaction report (offline, never re-runs)
 - ``intake`` — prompt intake triage + compilation (offline by default)
+- ``recall`` — return an output ``rules_mode="stashed"`` removed, hash-verified (offline)
 
 Stdlib only: no new dependencies, nothing added to the installed base package
 requirements. The deterministic core boundary is unchanged — this module only
@@ -211,6 +212,17 @@ def _tool_intake(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _tool_recall(args: dict[str, Any]) -> dict[str, Any]:
+    from lcc.relevance.transcript_stash import parse_lines, recall, recall_sha256
+
+    stash_id = args.get("id", "")
+    if not isinstance(stash_id, str):
+        raise ValueError("recall requires 'id' (the hex id after 'lcc recall' in the pointer)")
+    lines = args.get("lines")
+    span = parse_lines(lines) if isinstance(lines, str) and lines else None
+    return {"sha256": recall_sha256(stash_id), "text": recall(stash_id, span)}
+
+
 TOOLS: dict[str, dict[str, Any]] = {
     "compact": {
         "handler": _tool_compact,
@@ -271,15 +283,18 @@ TOOLS: dict[str, dict[str, Any]] = {
                 },
                 "rules_mode": {
                     "type": "string",
-                    "enum": ["lossless", "lossy", "recoverable"],
+                    "enum": ["lossless", "lossy", "recoverable", "stashed"],
                     "default": "lossless",
                     "description": (
                         "Only for provider 'rules'. 'lossless' replaces a tool result with a "
                         "pointer only when its text is kept verbatim in a later result, and "
                         "verifies it. 'recoverable' also replaces old file reads (of files "
                         "not written later) and read-only allowlisted command outputs with "
-                        "a re-read/re-run pointer, and verifies it. 'lossy' is EXPERIMENTAL "
-                        "(trims and drops outputs; failed blind audits v0.4 and v0.5)."
+                        "a re-read/re-run pointer, and verifies it. 'stashed' removes what "
+                        "'lossy' drops or trims and 'recoverable' replaces, after saving the "
+                        "exact bytes to a local stash; the pointer names a 'recall' id. "
+                        "'lossy' is EXPERIMENTAL (trims and drops outputs; failed blind "
+                        "audits v0.4 and v0.5)."
                     ),
                 },
                 "workspace_root": {
@@ -357,6 +372,22 @@ TOOLS: dict[str, dict[str, Any]] = {
                 "limit": {"type": "integer"},
             },
             "required": ["report"],
+        },
+    },
+    "recall": {
+        "handler": _tool_recall,
+        "description": (
+            "Return a tool output that compact_transcript (rules_mode 'stashed') replaced "
+            "with '[removed: N tokens · lcc recall <id>]'. The bytes are re-hashed on read, "
+            "so the text is exactly what was removed. Offline, local stash only."
+        ),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "description": "The hex id from the pointer."},
+                "lines": {"type": "string", "description": "Optional 1-based range 'a-b'."},
+            },
+            "required": ["id"],
         },
     },
     "intake": {

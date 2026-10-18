@@ -141,6 +141,8 @@ def _tools_list() -> list[dict[str, Any]]:
     annotations = _tool_annotations()
     tools = []
     for name, spec in TOOLS.items():
+        if name in _LOCAL_ONLY_TOOLS:
+            continue
         tool: dict[str, Any] = {
             "name": name,
             "description": spec["description"],
@@ -175,6 +177,27 @@ def _anonymous_provider_refusal(payload: dict[str, Any]) -> dict[str, Any] | Non
     )
 
 
+#: Tools that read the server's local disk: never exposed over HTTP.
+_LOCAL_ONLY_TOOLS = frozenset({"recall"})
+
+
+def _local_only_refusal(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Refuse the stash over HTTP: it would write and serve one disk shared by every caller."""
+    params = payload.get("params")
+    if payload.get("method") != "tools/call" or not isinstance(params, dict):
+        return None
+    arguments = params.get("arguments")
+    stashed = isinstance(arguments, dict) and arguments.get("rules_mode") == "stashed"
+    if params.get("name") not in _LOCAL_ONLY_TOOLS and not stashed:
+        return None
+    return _error_response(
+        payload.get("id"),
+        -32602,
+        "the local stash (rules_mode 'stashed', tool 'recall') is only served over stdio "
+        "(`lcc mcp`), never over HTTP",
+    )
+
+
 def _handle(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, bool]:
     """Dispatch one JSON-RPC message through the shared stdio handler.
 
@@ -182,7 +205,11 @@ def _handle(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, bool]:
     notification (no response body exists, only ``202 Accepted``).
     """
     is_notification = "id" not in payload
-    response = _anonymous_provider_refusal(payload) or handle_message(payload)
+    response = (
+        _local_only_refusal(payload)
+        or _anonymous_provider_refusal(payload)
+        or handle_message(payload)
+    )
     # Streamable HTTP negotiates a newer revision than the stdio server reports;
     # answering with the stdio version would make a conforming client negotiate down.
     if response is not None and payload.get("method") == "initialize":

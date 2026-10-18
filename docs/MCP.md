@@ -4,7 +4,7 @@
 [Model Context Protocol](https://modelcontextprotocol.io/) server over stdio
 (JSON-RPC 2.0, one JSON message per line as the MCP stdio spec requires;
 LSP-style `Content-Length` framing is also accepted, and each reply uses the
-framing of its request). It exposes six tools:
+framing of its request). It exposes seven tools:
 
 | Tool | What it does | Offline? |
 | :--- | :--- | :--- |
@@ -14,6 +14,7 @@ framing of its request). It exposes six tools:
 | `prepare` | Inspect-first deterministic preparation; returns `action` + `prompt` (or skip note) | Yes |
 | `explain` | Audits a `compact` report object (`report`, optional `source_text`/`only`/`limit`) | Yes |
 | `intake` | Intake triage: readiness, intent, questions, assumptions, compiled prompt | Yes (default; no relevance pass) |
+| `recall` | Returns an output `compact_transcript` (`rules_mode: "stashed"`) removed (`id`, optional `lines` `a-b`); hash-verified on read. See [`docs/TOOL_CALLS.md`](TOOL_CALLS.md) | Yes (stdio only; refused by `--http`) |
 
 Stdlib only — no new dependencies, and the base install is untouched. The
 server only calls the same public library entry points as the CLI, so the

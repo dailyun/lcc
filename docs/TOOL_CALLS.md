@@ -97,7 +97,7 @@ is a semantic question, and a lexical scorer cannot answer it honestly. Use `--p
 
 ### Offline policy: `--provider rules`
 
-No key, no model, no network. Three modes (`rules_mode`, MCP argument / Python API):
+No key, no model, no network. Four modes (`rules_mode`, MCP argument / Python API):
 
 **`lossless` (default)** — `src/lcc/relevance/transcript_lossless.py`. A tool result is
 replaced by a pointer to a later result that is kept unchanged and has the same `is_error`
@@ -151,6 +151,34 @@ Recommended config for live sessions: `provider: rules`, `rules_mode: recoverabl
 `workspace_root` = the session's cwd (the Claude Code hook sends it), command pointers off.
 `lossless` stays the default `rules_mode`: it needs no disk and makes no recovery claim.
 What each mode measured on real agent sessions: [REAL_SESSION_BENCHMARKS.md](REAL_SESSION_BENCHMARKS.md).
+
+**`stashed`** — `src/lcc/relevance/transcript_stash.py`. Removes what `lossy` would drop or
+trim plus what `recoverable` would replace, but stores the exact bytes first, so nothing removed
+is lost. Each removed result's UTF-8 text is written to a local content-addressed stash
+(`~/.cache/lcc/stash/<sha256>`, or `$LCC_STASH_DIR`; directory `0700`, files `0600`, written
+atomically) and the result becomes `[removed: N tokens · lcc recall <sha12>]` (`N` counted with
+the request's `model`). The whole result is replaced, never cut: a `lossy` trim becomes a full
+stash. Lossless dedupes still win where they apply. Kept as in those modes: pinned turns, the
+latest error and the call before it, calls named in the goal or recent turns, failed results,
+duplicate ids, and results no longer than their pointer. Calls, inputs and texts never change.
+Each decision is `replace` with reason `stashed:<rule that made it eligible>` and
+`stash: {sha256, tokens, bytes}`; the report adds `tool_calls_stashed` and `stash_dir`, and
+`semantic_guarantee` is `stashed`. `verify_stashed` re-checks every pointer against its blob
+(present, hash matches, bytes equal the original); a violation keeps everything. A blob that
+cannot be written keeps its result (`stash_write_failed:<error>`).
+
+Getting a result back re-hashes the blob and refuses one that fails:
+
+```bash
+lcc recall 3f9a1c0b2d4e               # whole output; 12-64 hex chars of the sha256
+lcc recall 3f9a1c0b2d4e --lines 40-80 # 1-based, inclusive
+```
+
+MCP: tool `recall` with `{"id": "...", "lines": "a-b"}` returns `{sha256, text}`. The stash
+is local to the machine running `lcc mcp` over stdio; `lcc mcp --http` refuses both `recall`
+and `rules_mode: "stashed"`, since one disk would be shared by every caller. No TTL or GC yet:
+the stash grows until you delete it (`rm -r ~/.cache/lcc/stash` is safe; pointers to deleted
+blobs just stop resolving). Not benchmarked yet: no reduction figure is claimed for this mode.
 
 **`lossy` (EXPERIMENTAL)** — failed two session-disjoint blind audits (bench v0.4: 21/150
 decisions flagged; v0.5: 36/132), because its trims and drops remove output an agent may still

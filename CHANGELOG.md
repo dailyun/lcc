@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **`rules_mode: "stashed"` and `lcc recall`.** Tool-call compaction can now remove what
+  `lossy` drops or trims and what `recoverable` replaces without losing it: the exact bytes go
+  to a local content-addressed stash (`~/.cache/lcc/stash`, `0700`/`0600`, `LCC_STASH_DIR`)
+  and the result becomes `[removed: N tokens · lcc recall <sha12>]`. `lcc recall` and the MCP
+  tool `recall` re-hash on read. stdio only; `lcc mcp --http` refuses it. `lossless` stays
+  the default. Measured offline on 847 real-session dossiers (owner-attested, private
+  receipts): 30.1% pooled token reduction, 0 verification violations. Agent-in-the-loop eval on
+  172 items (INFERIDO): non-inferior to full context on artifact recall with 36.6% fewer tokens,
+  and the model recalled the right blob on 90% of probes about stashed content.
 - **`provider="specialist-v3"`: a local block ranker for agent transcripts.** A frozen
   LR + boosted-tree model (183 KB, plain Python, no new dependency) ranks blocks and drops the
   lowest-ranked until `specialist_drop_fraction` (default 0.3) of candidate characters is gone.

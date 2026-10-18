@@ -42,6 +42,7 @@ from lcc.relevance.transcript_recoverable import (
     verify_recoverable,
 )
 from lcc.relevance.transcript_rules import rules_decisions
+from lcc.relevance.transcript_stash import stash_dir, stashed_decisions, verify_stashed
 from lcc.token_budget import count_tokens
 
 # Report fields that only a replaced (pointer) decision carries.
@@ -67,7 +68,9 @@ SUPPORTED_PROVIDERS = ("jev", "laya", "auto", "rules", SPECIALIST_PROVIDER)
 #: outputs an agent may still need and failed blind audits v0.4 (21/150) and v0.5 (36/132).
 #: ``recoverable`` (:mod:`lcc.relevance.transcript_recoverable`) also replaces old outputs the
 #: agent can get back by re-reading an unchanged file or re-running a read-only command.
-RULES_MODES = ("lossless", "lossy", "recoverable")
+#: ``stashed`` (:mod:`lcc.relevance.transcript_stash`) replaces what ``lossy`` drops or trims and
+#: ``recoverable`` replaces, after storing the exact bytes in a local stash (``lcc recall``).
+RULES_MODES = ("lossless", "lossy", "recoverable", "stashed")
 DEFAULT_THRESHOLD = 0.5
 DEFAULT_PRESERVE_RECENT = 6
 DEFAULT_TRIM_HEAD_CHARS = 300
@@ -984,7 +987,8 @@ def compact_transcript(request: TranscriptCompactionRequest) -> TranscriptCompac
     rules = request.provider == "rules"
     lossless = rules and request.rules_mode == "lossless"
     recoverable = rules and request.rules_mode == "recoverable"
-    verified = lossless or recoverable
+    stashed = rules and request.rules_mode == "stashed"
+    verified = lossless or recoverable or stashed
     use_disk = recoverable and bool(request.workspace_root) and request.disk_check
     specialist = request.provider in ("auto", SPECIALIST_PROVIDER)
     if rules:
@@ -1009,6 +1013,11 @@ def compact_transcript(request: TranscriptCompactionRequest) -> TranscriptCompac
         judge = "rules"
         if lossless:
             raw_decisions = lossless_decisions(messages, candidates)
+        elif stashed:
+            raw_decisions = stashed_decisions(
+                messages, candidates, request.question, model=request.model,
+                root=request.workspace_root, disk_check=request.disk_check,
+            )
         elif recoverable:
             raw_decisions = recoverable_decisions(
                 messages, candidates, request.question,
@@ -1144,7 +1153,9 @@ def compact_transcript(request: TranscriptCompactionRequest) -> TranscriptCompac
         # would be a bug in the policy, so the pass keeps everything instead of shipping it.
         after = messages_to_payload(rebuilt)
         lossless_violations = (
-            verify_lossless(request.payload, after) if lossless else verify_recoverable(
+            verify_lossless(request.payload, after) if lossless
+            else verify_stashed(request.payload, after) if stashed
+            else verify_recoverable(
                 request.payload, after, allow_command_pointers=request.allow_command_pointers)
         )
         if lossless_violations:
@@ -1214,6 +1225,7 @@ def compact_transcript(request: TranscriptCompactionRequest) -> TranscriptCompac
         "recoverability_check": (
             ("disk" if use_disk else "transcript_proxy") if recoverable else None
         ),
+        "stash_dir": str(stash_dir()) if stashed else None,
         "degraded": degraded,
         "degradation_reason": degradation_reason,
         "semantic_guarantee": semantic_guarantee,
@@ -1255,6 +1267,9 @@ def compact_transcript(request: TranscriptCompactionRequest) -> TranscriptCompac
         ),
         "tool_calls_replaced": sum(
             1 for decision in decisions if decision["decision"] == "replace"
+        ),
+        "tool_calls_stashed": sum(
+            1 for decision in decisions if decision["decision"] == "replace" and "stash" in decision
         ),
         "warnings": warnings,
         "decisions": pinned_decisions + decisions,
