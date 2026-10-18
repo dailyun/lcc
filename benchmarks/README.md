@@ -16,6 +16,10 @@ signals, then run safe optimization. It does not summarize, rewrite, or paraphra
 content. Semantic retrieval, semantic marker matching, paraphrase detection, and
 human/LLM-assisted quality evaluation are roadmap items, not implemented here.
 
+For the local judge comparison on synthetic transcripts (`specialist-v3`, mechanical, rules,
+BM25/recency baselines), see [`run_judge_bench.py`](run_judge_bench.py) and
+[docs/BENCHMARKS.md](../docs/BENCHMARKS.md).
+
 ## Run
 
 ```bash
