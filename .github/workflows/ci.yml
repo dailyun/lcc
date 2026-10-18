@@ -43,6 +43,9 @@ jobs:
       run: |
         python3 benchmarks/research/run_multiagent_ab.py --tasks 20 --provider mechanical
         python3 benchmarks/research/run_injection_e2e.py
+    - name: Judge benchmark smoke (synthetic, gated on no crash + recall floors)
+      run: |
+        python3 benchmarks/run_judge_bench.py --check --out "$RUNNER_TEMP/judge-bench"
 
   test-node:
     runs-on: ubuntu-latest
