@@ -1,5 +1,10 @@
 # Laya local semantic provider (`--provider laya`)
 
+> **Deprecated.** Laya is slow on CPU and its 512/1024-token window fits few transcripts.
+> No automatic or fallback path selects it; it runs only with `--provider laya`. For
+> transcripts use `auto`/`specialist-v3` ([SPECIALIST.md](SPECIALIST.md)). The code stays
+> for now.
+
 Laya is an optional, fully local semantic decision backend for `lcc compact`
 (developed by NandhaKishorM / Convai Innovations, Apache 2.0 —
 <https://github.com/NandhaKishorM/laya>).

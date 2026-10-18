@@ -1,8 +1,9 @@
 # Claude Code plugin (`lcc` on the Claude Code marketplace)
 
 `lcc` ships a Claude Code plugin that replaces the built-in compaction **summary** with
-verbatim compaction: the session transcript goes to the plugin's own `lcc mcp` server, Jev
-says which tool calls and results are spent, and those pairs are dropped. Kept messages carry
+verbatim compaction: the session transcript goes to the plugin's own `lcc mcp` server, the
+local `specialist-v3` ranker says which tool calls and results are spent, and those pairs are
+dropped or trimmed. Kept messages carry
 their original bytes; user and assistant text is never scored, trimmed or rewritten. The
 decision logic, the report schema and the fallback rules are the ones documented in
 [`docs/TOOL_CALLS.md`](TOOL_CALLS.md) for `lcc compact --mode tool-calls`.
@@ -11,8 +12,6 @@ decision logic, the report schema and the fallback rules are the ones documented
 
 ```bash
 export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1   # required while function hooks are early access
-export TYPESAFE_API_KEY=...                  # only for the default Jev judge
-                                            # or ~/.config/lcc/typesafe.key, or the keychain
 
 pip install "local-context-compiler[tiktoken]"   # the `lcc` CLI and its MCP server
 
@@ -20,9 +19,10 @@ claude plugin marketplace add lucasmartins-ai/lcc
 claude plugin install lcc@lcc
 ```
 
-Requirements: Claude Code **2.1.274 or newer** and `lcc` on `PATH`. A TypeSafe API key is
-needed only for the default Jev judge; set `provider: laya` in the plugin config to run
-locally with no key and no network.
+Requirements: Claude Code **2.1.274 or newer** and `lcc` on `PATH`. The default judge
+(`provider: auto`, i.e. `specialist-v3`) runs locally with no key and no network
+([details](SPECIALIST.md)). `provider: rules` is the offline deterministic policy. Jev is
+opt-in (`provider: jev`, needs `TYPESAFE_API_KEY`); Laya is deprecated and runs only when named.
 Against a checkout, without installing:
 
 ```bash

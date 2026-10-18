@@ -1,0 +1,1068 @@
+{
+ "schema": "judge-bench-1.0",
+ "machine": {
+  "platform": "macOS-27.0.1",
+  "machine": "arm64",
+  "python": "3.14.3",
+  "cpus": 10,
+  "load_avg_1m_at_start": 42.8,
+  "note": "macOS-27.0.1 arm64, Python 3.14.3, 10 CPUs, 1-minute load average 42.8 at start; latency is machine- and load-dependent."
+ },
+ "repeats": 3,
+ "baseline_rss_mb": 45.4,
+ "ranker": {
+  "specialist-v3": {
+   "0.3": {
+    "passes": 8,
+    "recall": 0.889
+   },
+   "0.5": {
+    "passes": 7,
+    "recall": 0.778
+   },
+   "0.7": {
+    "passes": 7,
+    "recall": 0.778
+   },
+   "per_case": {
+    "supersession": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "contradiction": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "config_value_change": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "exception_rule": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "pt_en_mixed": {
+     "0.3": {
+      "recall": 0.0,
+      "pass": false
+     },
+     "0.5": {
+      "recall": 0.0,
+      "pass": false
+     },
+     "0.7": {
+      "recall": 0.0,
+      "pass": false
+     }
+    },
+    "injection_in_tool_output": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "large_git_diff": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "old_root_cause": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "identical_reread": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 0.0,
+      "pass": false
+     },
+     "0.7": {
+      "recall": 0.0,
+      "pass": false
+     }
+    }
+   }
+  },
+  "mechanical": {
+   "0.3": {
+    "passes": 9,
+    "recall": 1.0
+   },
+   "0.5": {
+    "passes": 9,
+    "recall": 1.0
+   },
+   "0.7": {
+    "passes": 9,
+    "recall": 1.0
+   },
+   "per_case": {
+    "supersession": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "contradiction": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "config_value_change": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "exception_rule": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "pt_en_mixed": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "injection_in_tool_output": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "large_git_diff": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "old_root_cause": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "identical_reread": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    }
+   }
+  },
+  "bm25": {
+   "0.3": {
+    "passes": 9,
+    "recall": 1.0
+   },
+   "0.5": {
+    "passes": 9,
+    "recall": 1.0
+   },
+   "0.7": {
+    "passes": 7,
+    "recall": 0.778
+   },
+   "per_case": {
+    "supersession": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "contradiction": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 0.0,
+      "pass": false
+     }
+    },
+    "config_value_change": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "exception_rule": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "pt_en_mixed": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "injection_in_tool_output": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "large_git_diff": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "old_root_cause": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "identical_reread": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 0.0,
+      "pass": false
+     }
+    }
+   }
+  },
+  "recency": {
+   "0.3": {
+    "passes": 8,
+    "recall": 0.889
+   },
+   "0.5": {
+    "passes": 6,
+    "recall": 0.667
+   },
+   "0.7": {
+    "passes": 3,
+    "recall": 0.333
+   },
+   "per_case": {
+    "supersession": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "contradiction": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 0.0,
+      "pass": false
+     }
+    },
+    "config_value_change": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 0.0,
+      "pass": false
+     },
+     "0.7": {
+      "recall": 0.0,
+      "pass": false
+     }
+    },
+    "exception_rule": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "pt_en_mixed": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 0.0,
+      "pass": false
+     },
+     "0.7": {
+      "recall": 0.0,
+      "pass": false
+     }
+    },
+    "injection_in_tool_output": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "large_git_diff": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 0.0,
+      "pass": false
+     }
+    },
+    "old_root_cause": {
+     "0.3": {
+      "recall": 0.0,
+      "pass": false
+     },
+     "0.5": {
+      "recall": 0.0,
+      "pass": false
+     },
+     "0.7": {
+      "recall": 0.0,
+      "pass": false
+     }
+    },
+    "identical_reread": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 0.0,
+      "pass": false
+     }
+    }
+   }
+  },
+  "random": {
+   "0.3": {
+    "passes": 7,
+    "recall": 0.778
+   },
+   "0.5": {
+    "passes": 3,
+    "recall": 0.333
+   },
+   "0.7": {
+    "passes": 2,
+    "recall": 0.222
+   },
+   "per_case": {
+    "supersession": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "contradiction": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 0.0,
+      "pass": false
+     },
+     "0.7": {
+      "recall": 0.0,
+      "pass": false
+     }
+    },
+    "config_value_change": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 0.0,
+      "pass": false
+     },
+     "0.7": {
+      "recall": 0.0,
+      "pass": false
+     }
+    },
+    "exception_rule": {
+     "0.3": {
+      "recall": 0.0,
+      "pass": false
+     },
+     "0.5": {
+      "recall": 0.0,
+      "pass": false
+     },
+     "0.7": {
+      "recall": 0.0,
+      "pass": false
+     }
+    },
+    "pt_en_mixed": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 0.0,
+      "pass": false
+     },
+     "0.7": {
+      "recall": 0.0,
+      "pass": false
+     }
+    },
+    "injection_in_tool_output": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 0.0,
+      "pass": false
+     }
+    },
+    "large_git_diff": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.7": {
+      "recall": 1.0,
+      "pass": true
+     }
+    },
+    "old_root_cause": {
+     "0.3": {
+      "recall": 0.0,
+      "pass": false
+     },
+     "0.5": {
+      "recall": 0.0,
+      "pass": false
+     },
+     "0.7": {
+      "recall": 0.0,
+      "pass": false
+     }
+    },
+    "identical_reread": {
+     "0.3": {
+      "recall": 1.0,
+      "pass": true
+     },
+     "0.5": {
+      "recall": 0.0,
+      "pass": false
+     },
+     "0.7": {
+      "recall": 0.0,
+      "pass": false
+     }
+    }
+   }
+  }
+ },
+ "passes": {
+  "specialist-v3": {
+   "must_keep_kept": 9,
+   "must_keep_total": 9,
+   "edge_token_reduction": 0.004,
+   "token_count_method": "approximate",
+   "edge_ms_median": 67.5,
+   "edge_ms_p90": 277.9,
+   "fixtures": {
+    "synthetic_15_turns": {
+     "blocks": 302,
+     "median_ms": 180.7,
+     "token_reduction": 0.03
+    },
+    "synthetic_56_turns": {
+     "blocks": 1138,
+     "median_ms": 3406.9,
+     "token_reduction": 0.024
+    }
+   },
+   "peak_rss_mb": 71.0,
+   "per_case": {
+    "supersession": {
+     "needles_kept": 1,
+     "tokens_before": 5180,
+     "tokens_after": 5180
+    },
+    "contradiction": {
+     "needles_kept": 1,
+     "tokens_before": 5923,
+     "tokens_after": 5882
+    },
+    "config_value_change": {
+     "needles_kept": 1,
+     "tokens_before": 7008,
+     "tokens_after": 7008
+    },
+    "exception_rule": {
+     "needles_kept": 1,
+     "tokens_before": 5538,
+     "tokens_after": 5538
+    },
+    "pt_en_mixed": {
+     "needles_kept": 1,
+     "tokens_before": 5953,
+     "tokens_after": 5953
+    },
+    "injection_in_tool_output": {
+     "needles_kept": 1,
+     "tokens_before": 5660,
+     "tokens_after": 5660
+    },
+    "large_git_diff": {
+     "needles_kept": 1,
+     "tokens_before": 8414,
+     "tokens_after": 8334
+    },
+    "old_root_cause": {
+     "needles_kept": 1,
+     "tokens_before": 4850,
+     "tokens_after": 4733
+    },
+    "identical_reread": {
+     "needles_kept": 1,
+     "tokens_before": 6920,
+     "tokens_after": 6912
+    }
+   }
+  },
+  "rules-lossless": {
+   "must_keep_kept": 9,
+   "must_keep_total": 9,
+   "edge_token_reduction": 0.003,
+   "token_count_method": "approximate",
+   "edge_ms_median": 0.9,
+   "edge_ms_p90": 1.7,
+   "fixtures": {
+    "synthetic_15_turns": {
+     "blocks": 302,
+     "median_ms": 2.2,
+     "token_reduction": 0.0
+    },
+    "synthetic_56_turns": {
+     "blocks": 1138,
+     "median_ms": 16.4,
+     "token_reduction": 0.0
+    }
+   },
+   "peak_rss_mb": 54.8,
+   "per_case": {
+    "supersession": {
+     "needles_kept": 1,
+     "tokens_before": 5180,
+     "tokens_after": 5180
+    },
+    "contradiction": {
+     "needles_kept": 1,
+     "tokens_before": 5923,
+     "tokens_after": 5923
+    },
+    "config_value_change": {
+     "needles_kept": 1,
+     "tokens_before": 7008,
+     "tokens_after": 7008
+    },
+    "exception_rule": {
+     "needles_kept": 1,
+     "tokens_before": 5538,
+     "tokens_after": 5538
+    },
+    "pt_en_mixed": {
+     "needles_kept": 1,
+     "tokens_before": 5953,
+     "tokens_after": 5953
+    },
+    "injection_in_tool_output": {
+     "needles_kept": 1,
+     "tokens_before": 5660,
+     "tokens_after": 5660
+    },
+    "large_git_diff": {
+     "needles_kept": 1,
+     "tokens_before": 8414,
+     "tokens_after": 8414
+    },
+    "old_root_cause": {
+     "needles_kept": 1,
+     "tokens_before": 4850,
+     "tokens_after": 4850
+    },
+    "identical_reread": {
+     "needles_kept": 1,
+     "tokens_before": 6920,
+     "tokens_after": 6780
+    }
+   }
+  },
+  "rules-recoverable": {
+   "must_keep_kept": 9,
+   "must_keep_total": 9,
+   "edge_token_reduction": 0.003,
+   "token_count_method": "approximate",
+   "edge_ms_median": 1.4,
+   "edge_ms_p90": 3.1,
+   "fixtures": {
+    "synthetic_15_turns": {
+     "blocks": 302,
+     "median_ms": 3.0,
+     "token_reduction": 0.0
+    },
+    "synthetic_56_turns": {
+     "blocks": 1138,
+     "median_ms": 22.3,
+     "token_reduction": 0.0
+    }
+   },
+   "peak_rss_mb": 54.6,
+   "per_case": {
+    "supersession": {
+     "needles_kept": 1,
+     "tokens_before": 5180,
+     "tokens_after": 5180
+    },
+    "contradiction": {
+     "needles_kept": 1,
+     "tokens_before": 5923,
+     "tokens_after": 5923
+    },
+    "config_value_change": {
+     "needles_kept": 1,
+     "tokens_before": 7008,
+     "tokens_after": 7008
+    },
+    "exception_rule": {
+     "needles_kept": 1,
+     "tokens_before": 5538,
+     "tokens_after": 5538
+    },
+    "pt_en_mixed": {
+     "needles_kept": 1,
+     "tokens_before": 5953,
+     "tokens_after": 5953
+    },
+    "injection_in_tool_output": {
+     "needles_kept": 1,
+     "tokens_before": 5660,
+     "tokens_after": 5660
+    },
+    "large_git_diff": {
+     "needles_kept": 1,
+     "tokens_before": 8414,
+     "tokens_after": 8414
+    },
+    "old_root_cause": {
+     "needles_kept": 1,
+     "tokens_before": 4850,
+     "tokens_after": 4850
+    },
+    "identical_reread": {
+     "needles_kept": 1,
+     "tokens_before": 6920,
+     "tokens_after": 6780
+    }
+   }
+  },
+  "v3-blocks": {
+   "must_keep_kept": 8,
+   "must_keep_total": 9,
+   "edge_token_reduction": 0.21,
+   "token_count_method": "approximate",
+   "edge_ms_median": 68.6,
+   "edge_ms_p90": 282.4,
+   "fixtures": {
+    "synthetic_15_turns": {
+     "blocks": 302,
+     "median_ms": 161.9,
+     "token_reduction": 0.254
+    },
+    "synthetic_56_turns": {
+     "blocks": 1138,
+     "median_ms": 3211.0,
+     "token_reduction": 0.273
+    }
+   },
+   "peak_rss_mb": 70.9,
+   "per_case": {
+    "supersession": {
+     "needles_kept": 1,
+     "tokens_before": 5180,
+     "tokens_after": 4072
+    },
+    "contradiction": {
+     "needles_kept": 1,
+     "tokens_before": 5923,
+     "tokens_after": 4682
+    },
+    "config_value_change": {
+     "needles_kept": 1,
+     "tokens_before": 7008,
+     "tokens_after": 5374
+    },
+    "exception_rule": {
+     "needles_kept": 1,
+     "tokens_before": 5538,
+     "tokens_after": 4525
+    },
+    "pt_en_mixed": {
+     "needles_kept": 0,
+     "tokens_before": 5953,
+     "tokens_after": 4757
+    },
+    "injection_in_tool_output": {
+     "needles_kept": 1,
+     "tokens_before": 5660,
+     "tokens_after": 4499
+    },
+    "large_git_diff": {
+     "needles_kept": 1,
+     "tokens_before": 8414,
+     "tokens_after": 6430
+    },
+    "old_root_cause": {
+     "needles_kept": 1,
+     "tokens_before": 4850,
+     "tokens_after": 4018
+    },
+    "identical_reread": {
+     "needles_kept": 1,
+     "tokens_before": 6920,
+     "tokens_after": 5421
+    }
+   }
+  },
+  "mechanical-blocks": {
+   "must_keep_kept": 9,
+   "must_keep_total": 9,
+   "edge_token_reduction": 0.346,
+   "token_count_method": "approximate",
+   "edge_ms_median": 39.5,
+   "edge_ms_p90": 194.1,
+   "fixtures": {
+    "synthetic_15_turns": {
+     "blocks": 302,
+     "median_ms": 88.9,
+     "token_reduction": 0.005
+    },
+    "synthetic_56_turns": {
+     "blocks": 1138,
+     "median_ms": 2709.1,
+     "token_reduction": 0.003
+    }
+   },
+   "peak_rss_mb": 68.4,
+   "per_case": {
+    "supersession": {
+     "needles_kept": 1,
+     "tokens_before": 5180,
+     "tokens_after": 2308
+    },
+    "contradiction": {
+     "needles_kept": 1,
+     "tokens_before": 5923,
+     "tokens_after": 5267
+    },
+    "config_value_change": {
+     "needles_kept": 1,
+     "tokens_before": 7008,
+     "tokens_after": 6146
+    },
+    "exception_rule": {
+     "needles_kept": 1,
+     "tokens_before": 5538,
+     "tokens_after": 1469
+    },
+    "pt_en_mixed": {
+     "needles_kept": 1,
+     "tokens_before": 5953,
+     "tokens_after": 2809
+    },
+    "injection_in_tool_output": {
+     "needles_kept": 1,
+     "tokens_before": 5660,
+     "tokens_after": 1674
+    },
+    "large_git_diff": {
+     "needles_kept": 1,
+     "tokens_before": 8414,
+     "tokens_after": 8414
+    },
+    "old_root_cause": {
+     "needles_kept": 1,
+     "tokens_before": 4850,
+     "tokens_after": 3369
+    },
+    "identical_reread": {
+     "needles_kept": 1,
+     "tokens_before": 6920,
+     "tokens_after": 4791
+    }
+   }
+  }
+ },
+ "wall_s": 19.8
+}

@@ -9,7 +9,7 @@ framing of its request). It exposes seven tools:
 | Tool | What it does | Offline? |
 | :--- | :--- | :--- |
 | `compact` | Relevance compaction (`text`, `question`, `provider=mechanical`, `threshold=0.4`); returns `compacted_text` + full report | Yes with `mechanical`/`laya`; `jev` needs `TYPESAFE_API_KEY` |
-| `compact_transcript` | Tool-call compaction of a session transcript (`messages`, `question`, `preserve_recent=6`): pairs each tool call with its result and keeps, trims or drops the pair; kept messages are verbatim. Contract and limits: [`docs/TOOL_CALLS.md`](TOOL_CALLS.md) | `jev`/`auto` only (needs `TYPESAFE_API_KEY`); failures keep every call |
+| `compact_transcript` | Tool-call compaction of a session transcript (`messages`, `question`, `preserve_recent=6`): pairs each tool call with its result and keeps, trims or drops the pair; kept messages are verbatim. Contract and limits: [`docs/TOOL_CALLS.md`](TOOL_CALLS.md) | Yes: `auto` (default, local `specialist-v3`) and `rules`; `jev` is opt-in and needs `TYPESAFE_API_KEY`; failures keep every call |
 | `inspect` | Read-only diagnostic inspection; returns the inspection report | Yes |
 | `prepare` | Inspect-first deterministic preparation; returns `action` + `prompt` (or skip note) | Yes |
 | `explain` | Audits a `compact` report object (`report`, optional `source_text`/`only`/`limit`) | Yes |

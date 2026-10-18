@@ -85,13 +85,15 @@ runs requests concurrently.
 | Situation | `provider_used` | `degraded` | `semantic_guarantee` | What happens |
 | :--- | :--- | :--- | :--- | :--- |
 | no key / `LCC_DISABLE_NETWORK=1` | `jev` | true | `none` | every call kept, reason `jev_unavailable_fail_safe` |
+| `--provider auto` (default) / `specialist-v3` | `specialist-v3` | false | `none` | the local ranker decides; if it fails, every call kept (`specialist_v3_failed_fail_safe`, degraded) |
 | a batch fails | `degraded` when nothing was judged, `jev+partial_fail_safe` otherwise | true | `none` / `partial` | unjudged calls kept, judged calls keep their verdict |
 | answer missing / malformed / outside 0–1 | — | — | — | that call is kept and the reason is a warning (`jev_missing_answer:…`, `jev_answer_out_of_range:…`) |
 | nothing to score (all pinned) | `jev` | false | `none` | reason `no_candidates`; no call is claimed as judged |
 
 `mechanical` is refused (exit 2) in this mode: "is this tool output still needed"
 is a semantic question, and a lexical scorer cannot answer it honestly. Use `--provider jev`,
-`laya` (local judge), `auto` (prefers Jev), or `rules` (offline policy, below).
+`auto` (default: the local `specialist-v3` ranker, [SPECIALIST.md](SPECIALIST.md)),
+`specialist-v3`, `jev` (opt-in), `laya` (deprecated, opt-in), or `rules` (offline policy, below).
 
 ### Offline policy: `--provider rules`
 
@@ -199,7 +201,7 @@ only, never to Read/Grep of source.
 
 ## 6. CLI options
 
-Honored: `--question`, `--provider jev|laya|auto|rules`, `--threshold`, `--trim-head-chars`,
+Honored: `--question`, `--provider jev|laya|auto|rules|specialist-v3`, `--threshold`, `--trim-head-chars`,
 `--preserve-recent`, `--max-state-tokens`, `--max-request-tokens`, `--batch-size`,
 `--max-workers`, `--min-reduction` (sets `worth_it`), `--model` (token counting),
 `--jev-model`, `-o/--output`, `-r/--report`, `--dry-run`.
