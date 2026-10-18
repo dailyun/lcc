@@ -75,7 +75,7 @@ TOKEN_ENV = "LCC_HTTP_TOKEN"
 _ANONYMOUS_PROVIDERS = frozenset({"mechanical", "rules"})
 
 # Tools that take a ``provider`` argument, with the default each applies when it is absent.
-_PROVIDER_DEFAULTS = {"compact": "mechanical", "compact_transcript": "jev"}
+_PROVIDER_DEFAULTS = {"compact": "mechanical", "compact_transcript": "auto"}
 
 # Where the OpenAI submission portal looks for domain-ownership proof. It must be on
 # the MCP hostname or an eligible parent domain, and must return the exact token as

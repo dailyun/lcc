@@ -101,13 +101,14 @@ test("toMcpMessages forwards a result's error flag, and only when set", () => {
   ]);
 });
 
-test("the judge is configurable and defaults to jev", () => {
+test("the judge is configurable and defaults to auto (specialist-v3)", () => {
   // The local judge is opt-in; an unknown value must not reach the MCP tool.
-  assert.equal(resolveOptions({}).provider, "jev");
+  assert.equal(resolveOptions({}).provider, "auto");
   assert.equal(resolveOptions({ provider: "laya" }).provider, "laya");
   assert.equal(resolveOptions({ provider: "auto" }).provider, "auto");
   assert.equal(resolveOptions({ provider: "rules" }).provider, "rules");
-  assert.equal(resolveOptions({ provider: "nonsense" }).provider, "jev");
+  assert.equal(resolveOptions({ provider: "nonsense" }).provider, "auto");
+  assert.equal(resolveOptions({ provider: "jev" }).provider, "jev");
 
   const args = buildCompactArgs({
     messages: TRANSCRIPT,
@@ -124,7 +125,7 @@ test("buildCompactArgs prefers an explicit question, then the /compact instructi
     options: { question: "reduce mobile booking friction" },
   });
   assert.equal(explicit.question, "reduce mobile booking friction");
-  assert.equal(explicit.provider, "jev");
+  assert.equal(explicit.provider, "auto");
   assert.equal(explicit.preserve_recent, 6);
   assert.equal(explicit.messages.length, 3);
 
@@ -204,6 +205,10 @@ test("decideReplacement replaces only a judged pass that removed something", () 
     decideReplacement({ report: { degraded: false, reduction_ratio: 0.9 }, messages: [], minReductionRatio: 0.25 }).replace,
     false,
   );
+});
+
+test("specialist-v3 is selectable", () => {
+  assert.equal(resolveOptions({ provider: "specialist-v3" }).provider, "specialist-v3");
 });
 
 test("toSessionMessages returns exactly what the engine rebuilds from", () => {

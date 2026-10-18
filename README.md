@@ -54,8 +54,9 @@ claude plugin marketplace add lucasmartins-ai/lcc
 claude plugin install lcc@lcc
 ```
 
-The plugin needs the early-access function-hooks flag and a judge (a TypeSafe key for Jev, or
-`provider: laya` for fully local); without one it falls back to the built-in summary. See the
+The plugin needs the early-access function-hooks flag. Its default judge is the local
+`specialist-v3` ranker (no key); Jev is opt-in (`provider: jev`). When a pass fails it falls
+back to the built-in summary. See the
 [Claude Code plugin guide](docs/CLAUDE_CODE.md).
 
 ## Where it fits in a token-saving stack
@@ -187,7 +188,8 @@ For full execution/verification chains, use the separate
 | Provider | Execution | Setup | What the report establishes |
 | --- | --- | --- | --- |
 | `mechanical` | Offline lexical scoring | Base install | `semantic_guarantee: none`; no semantic judgment |
-| `laya` | Local semantic scoring | Extra and model assets; setup may download weights | Named model, budget and fallback state |
+| `specialist-v3` | Offline block ranker for agent transcripts; `auto` uses it whenever structured blocks are present | Base install | `semantic_guarantee: none`; a rank, not a judgment ([details](docs/SPECIALIST.md)) |
+| `laya` (deprecated) | Local semantic scoring, only when named | Extra and model assets; setup may download weights | Named model, budget and fallback state |
 | `jev` | Remote typed decisions | `TYPESAFE_API_KEY` and network | Semantic judgment or explicit degradation; sends the objective and context blocks |
 
 ```sh
@@ -224,8 +226,8 @@ explain where evidence can still be lost. Preservation is not a security verdict
 
 The stdio MCP server exposes `compact`, `compact_transcript`, `inspect`,
 `prepare`, `explain` and `intake`. `compact` defaults to mechanical scoring.
-Tool-call transcripts use a semantic provider (Jev or Laya) or the offline `rules`
-policy; user/assistant messages remain pinned. Results on real agent sessions:
+Tool-call transcripts use `auto` (the local `specialist-v3` ranker) by default, Jev on
+opt-in, or the offline `rules` policy; user/assistant messages remain pinned. Results on real agent sessions:
 [real-session benchmarks](docs/REAL_SESSION_BENCHMARKS.md). See [MCP](docs/MCP.md),
 [tool-call mode](docs/TOOL_CALLS.md) and
 [Claude Code integration](docs/CLAUDE_CODE.md). Plugin transport and live model

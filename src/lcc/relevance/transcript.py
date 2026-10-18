@@ -55,9 +55,12 @@ TRANSCRIPT_SCHEMA_VERSION = "transcript-compaction-1.0"
 LAYA_INIT_ERROR: str | None = None
 LOGGER = logging.getLogger("lcc.transcript")
 
-#: Providers this mode accepts: a semantic judge (``auto`` prefers Jev), or ``rules`` — the
-#: offline deterministic policy.
-SUPPORTED_PROVIDERS = ("jev", "laya", "auto", "rules")
+#: Providers this mode accepts. ``auto`` is ``specialist-v3``, the local block ranker: a
+#: transcript always carries the structured block metadata it needs. ``jev`` (remote) and
+#: ``laya`` (local, DEPRECATED) run only when asked for by name; ``rules`` is the offline
+#: deterministic policy.
+SPECIALIST_PROVIDER = "specialist-v3"
+SUPPORTED_PROVIDERS = ("jev", "laya", "auto", "rules", SPECIALIST_PROVIDER)
 #: ``rules`` modes. ``lossless`` (default, :mod:`lcc.relevance.transcript_lossless`) only
 #: replaces results whose text survives verbatim in a later kept result, and verifies it.
 #: ``lossy`` (:mod:`lcc.relevance.transcript_rules`) is EXPERIMENTAL: it trims and drops
@@ -149,7 +152,7 @@ class TranscriptCompactionRequest:
 
     payload: Any
     question: str
-    provider: str = "jev"
+    provider: str = "auto"
     threshold: float = DEFAULT_THRESHOLD
     preserve_recent: int = DEFAULT_PRESERVE_RECENT
     trim_head_chars: int = DEFAULT_TRIM_HEAD_CHARS
@@ -831,6 +834,82 @@ def _possibly_trimmed(
     )
 
 
+def _specialist_decisions(
+    messages: list[TranscriptMessage], candidates: list[ToolCall], question: str
+) -> list[dict[str, Any]]:
+    """Rank the transcript with specialist-v3 and map block drops back onto tool calls.
+
+    The whole conversation is rendered with trusted segments and run through block
+    compaction (``provider="specialist-v3"``), so LCC's protection, the drop budget and the
+    sufficiency pass all apply unchanged. A call's result counts as dropped only when every
+    block overlapping it was dropped; text blocks are never touched here. Raises on anything
+    short of a clean ranker pass, so the caller can keep everything instead.
+    """
+    from lcc.relevance.blocks import split_blocks
+    from lcc.relevance.compactor import RelevanceCompactionRequest, compact_context
+    from lcc.relevance.specialist import BlockSegment, render_transcript
+
+    text, segments = render_transcript(messages)
+    # The same part order render_transcript writes: text, tool calls, tool results.
+    parts: list[tuple[str, str] | None] = []
+    for message in messages:
+        if message.text:
+            parts.append(None)
+        parts.extend(("call", call.id) for call in message.tool_calls)
+        parts.extend(("result", result.id) for result in message.tool_results)
+    if len(parts) != len(segments):
+        raise TranscriptError("specialist-v3: rendered segments do not match the transcript")
+    segment_of = {part: seg for part, seg in zip(parts, segments, strict=True) if part}
+
+    request = RelevanceCompactionRequest(
+        text=text, question=question, provider=SPECIALIST_PROVIDER, segments=segments
+    )
+    report = compact_context(request).report
+    if report.provider_used != SPECIALIST_PROVIDER:
+        raise TranscriptError(f"specialist-v3 did not rank the transcript: {report.provider_used}")
+    by_id = {decision.id: decision for decision in report.decisions}
+    blocks = split_blocks(
+        text, min_block_chars=request.min_block_chars, max_block_chars=request.max_block_chars
+    )
+
+    def verdict(segment: BlockSegment) -> tuple[bool, float | None]:
+        # ponytail: linear scan per segment, O(segments x blocks); bisect if 1k+ blocks get slow.
+        hits = [
+            by_id.get(block.id)
+            for block in blocks
+            if block.character_start < segment.character_end
+            and block.character_end > segment.character_start
+        ]
+        scores = [hit.score for hit in hits if hit is not None and hit.score is not None]
+        gone = bool(hits) and all(hit is not None and hit.decision == "drop" for hit in hits)
+        return gone, max(scores) if scores else None
+
+    decisions: list[dict[str, Any]] = []
+    for call in candidates:
+        result_gone, score = verdict(segment_of[("result", call.id)])
+        call_gone, _ = verdict(segment_of[("call", call.id)])
+        if result_gone and call_gone:
+            decision, reason = "drop", "specialist_rank_below_budget"
+        elif result_gone:
+            decision, reason = "trim", "specialist_result_below_budget_call_kept"
+        else:
+            decision, reason = "keep", "specialist_rank_kept"
+        decisions.append(
+            {
+                "id": call.id,
+                "decision": decision,
+                "score": score,
+                "keep_call": None,
+                "keep_result": None,
+                "source": SPECIALIST_PROVIDER,
+                "reason": reason,
+                "message_index": call.message_index,
+                "tool": call.tool,
+            }
+        )
+    return decisions
+
+
 # --------------------------------------------------------------------------------------
 # entry point
 # --------------------------------------------------------------------------------------
@@ -907,11 +986,14 @@ def compact_transcript(request: TranscriptCompactionRequest) -> TranscriptCompac
     recoverable = rules and request.rules_mode == "recoverable"
     verified = lossless or recoverable
     use_disk = recoverable and bool(request.workspace_root) and request.disk_check
+    specialist = request.provider in ("auto", SPECIALIST_PROVIDER)
     if rules:
         provider_used = "rules"
+    if specialist:
+        provider_used = SPECIALIST_PROVIDER
     client = (
         None
-        if rules
+        if rules or specialist
         else request.client
         if request.client is not None
         else _resolve_client(request.provider, request.laya_model)
@@ -939,6 +1021,32 @@ def compact_transcript(request: TranscriptCompactionRequest) -> TranscriptCompac
             _with_chars(decision, call, trim_head_chars=request.trim_head_chars)
             for decision, call in zip(raw_decisions, candidates, strict=True)
         ]
+    elif specialist:
+        # Any ranker error keeps everything: tool-call mode has no lexical fallback.
+        started = time.perf_counter()
+        try:
+            raw_decisions = _specialist_decisions(messages, candidates, request.question)
+        except Exception as exc:
+            LOGGER.warning("specialist-v3 failed on a transcript, keeping every call: %r", exc)
+            degraded = True
+            provider_used = "degraded"
+            degradation_reason = "specialist_v3_failed_fail_safe"
+            warnings.append(
+                f"specialist_v3_failed: {type(exc).__name__}; kept every tool call (fail-safe)"
+            )
+            decisions = [
+                _decide(call, {}, threshold=request.threshold,
+                        trim_head_chars=request.trim_head_chars)
+                for call in candidates
+            ]
+        else:
+            judge = SPECIALIST_PROVIDER
+            provider_used = SPECIALIST_PROVIDER
+            decisions = [
+                _with_chars(decision, call, trim_head_chars=request.trim_head_chars)
+                for decision, call in zip(raw_decisions, candidates, strict=True)
+            ]
+        latency_ms = round((time.perf_counter() - started) * 1000)
     elif client is None:
         degraded = True
         degradation_reason = f"{judge}_unavailable_fail_safe"

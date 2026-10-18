@@ -4,7 +4,9 @@ OFF unless ``LCC_REQUEST_LOG=1``. Writes append-only JSONL to ``LCC_REQUEST_LOG_
 (default ``./.lcc/request-log``, gitignored). Each entry holds only the redacted goal,
 language (EN/PT short-goal heuristic), a salted session hash, the UTC date, the entry
 point (``tool``, e.g. "mcp:compact" or "cli:compact"), the caller's field (or "none"),
-the LCC version and the redaction ruleset hash. No MCP tool or CLI flag supplies a
+the LCC version and the redaction ruleset hash. Tool-call compaction entries also carry
+``provider`` (the provider that ran, e.g. "specialist-v3") and ``degradation_reason``
+(or "none"): fixed labels from the report, never content. No MCP tool or CLI flag supplies a
 ``field`` today, so it stays "none" until a caller passes one to ``log_request``.
 Context/dossier text is never passed in. A failure warns (RuntimeWarning on stderr)
 and never changes LCC output.
@@ -241,6 +243,8 @@ def log_request(
     field: Any = None,
     language: Any = None,
     session_key: str | None = None,
+    provider: str | None = None,
+    degradation_reason: str | None = None,
 ) -> Path | None:
     """Append one redacted entry when enabled; return the log path or None. Never raises."""
     if not enabled() or not isinstance(goal, str) or not goal.strip():
@@ -263,6 +267,9 @@ def log_request(
             "lcc_version": __version__,
             "redaction_ruleset_sha256": RULESET_SHA256,
         }
+        if provider is not None:
+            entry["provider"] = provider
+            entry["degradation_reason"] = degradation_reason or "none"
         _append(directory, entry)
         return directory / LOG_FILE
     except Exception as exc:  # logging must never break compilation, but must be seen
@@ -297,6 +304,7 @@ def summarize(directory: Path | None = None) -> dict[str, Any]:
         "enabled": enabled(),
         "total": len(entries),
         "by_language": dict(Counter(str(e.get("language") or "unknown") for e in entries)),
+        "by_provider": dict(Counter(str(e["provider"]) for e in entries if "provider" in e)),
         "sessions": len({e.get("session") for e in entries}),
         "by_session": dict(Counter(str(e.get("session")) for e in entries)),
     }
