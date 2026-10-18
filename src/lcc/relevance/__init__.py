@@ -1,12 +1,15 @@
 """Opt-in instant relevance compaction (ADR 0013).
 
 Drops context blocks that are irrelevant to an objective before a larger model ever sees
-them. Two modes:
+them. Modes:
 
 - ``provider="jev"``/``"auto"``: narrow model judgment (TypeSafe System One, "Jev") scores
   every candidate block in batches; blocks below ``threshold`` are dropped.
 - ``provider="mechanical"``: fully local fallback that only drops blocks with zero lexical
   overlap with the objective. Used automatically when no API key is configured.
+- ``provider="specialist-v3"``: frozen local ranker over structured transcript blocks
+  (``segments`` from :func:`render_transcript`). ``auto`` uses it instead of mechanical when
+  Jev is unavailable and segments are given. See ``docs/SPECIALIST.md``.
 
 Everything is conservative: kept bytes are re-emitted exactly, blocks that are short or
 match ``keep_patterns`` are never scored, and any failure keeps content rather than
@@ -94,6 +97,12 @@ from lcc.relevance.provider import (
     get_semantic_provider,
 )
 from lcc.relevance.safety import BlockAssessment, decide_assessment
+from lcc.relevance.specialist import (
+    SPECIALIST_PROVIDER,
+    BlockSegment,
+    SpecialistModelError,
+    render_transcript,
+)
 from lcc.relevance.sufficiency import SufficiencyResult, verify_sufficiency
 from lcc.relevance.transcript import (
     SUPPORTED_PROVIDERS,
@@ -138,11 +147,13 @@ __all__ = [
     "RELEVANCE_SCHEMA_VERSION",
     "RESTORATION_REASONS",
     "SEMANTIC_PROVIDERS",
+    "SPECIALIST_PROVIDER",
     "SUPPORTED_PROVIDERS",
     "TRANSCRIPT_SCHEMA_VERSION",
     "TRIM_POLICY_VERSION",
     "BlockAssessment",
     "BlockDecision",
+    "BlockSegment",
     "ContextGraph",
     "DecisionCache",
     "EdgeType",
@@ -166,6 +177,7 @@ __all__ = [
     "RelevanceCompactionResult",
     "SemanticProvider",
     "SemanticVerificationResult",
+    "SpecialistModelError",
     "VERIFIER_POLICY_VERSION",
     "VerificationContract",
     "VerifierDecision",
@@ -204,6 +216,7 @@ __all__ = [
     "parse_transcript",
     "reconstruct",
     "render_ir_explanation",
+    "render_transcript",
     "report_to_dict",
     "resolve_typesafe_key",
     "restored_ids",

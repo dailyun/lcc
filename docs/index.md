@@ -41,6 +41,7 @@ MCP (Claude Code, Cursor, Claude Desktop):
 - [Quickstart](QUICKSTART.md): every command, offline
 - [Claude Code plugin](CLAUDE_CODE.md): verbatim `/compact` instead of a lossy summary
 - [Tool-call mode](TOOL_CALLS.md): compacting agent transcripts
+- [Specialist v3](SPECIALIST.md): offline block ranker for structured transcripts
 - [Real-session benchmarks](REAL_SESSION_BENCHMARKS.md): what each mode removed on real agent sessions
 - [MCP server](MCP.md): the six tools
 - [ChatGPT plugin](CHATGPT_PLUGIN.md) and [privacy policy](PRIVACY_POLICY.md)

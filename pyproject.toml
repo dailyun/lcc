@@ -82,7 +82,7 @@ lcc = "lcc.cli:cli_main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-lcc = ["py.typed"]
+lcc = ["py.typed", "relevance/specialist_v3.json"]
 
 [tool.ruff]
 line-length = 100
