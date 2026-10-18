@@ -210,8 +210,8 @@ class RelevanceCompactionRequest:
     #: to the deterministic default so emission stays byte-stable.
     ir_collected_at: str | None = None
     #: Trusted block metadata for ``specialist-v3`` (see ``lcc.relevance.specialist``): one
-    #: segment per rendered content part, from :func:`render_transcript`. When present and
-    #: Jev is unavailable, ``auto`` falls back to ``specialist-v3`` instead of mechanical.
+    #: segment per rendered content part, from :func:`render_transcript`. When present,
+    #: ``auto`` means ``specialist-v3`` (Jev only when named; Laya never automatically).
     segments: tuple[BlockSegment, ...] | None = None
     #: ``specialist-v3`` is a ranker: it drops its lowest-ranked candidate blocks until this
     #: share of candidate characters is removed. Protected blocks never count as candidates.
@@ -1446,7 +1446,21 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
     specialist_fallback_to_mechanical = False
     laya_fallback_to_mechanical = False
     nimble_fallback_to_mechanical = False
-    if provider_requested in ("auto", "jev"):
+    # With trusted block metadata, auto means the local specialist-v3 ranker, ahead of Jev
+    # (opt-in with provider="jev"). Laya is never selected automatically.
+    auto_specialist = (
+        provider_requested == "auto"
+        and request.segments is not None
+        and request.decisions_cache_path is None
+    )
+    if auto_specialist:
+        semantic_guarantee = "none"
+        specialist_judge = _load_specialist(warnings)
+        if specialist_judge is None:
+            degraded = True
+            specialist_fallback_to_mechanical = True
+            degradation_reason = "specialist_v3_unavailable_mechanical_fallback"
+    elif provider_requested in ("auto", "jev"):
         client = request.client if request.client is not None else _resolve_client()
         if client is None:
             if provider_requested == "jev":
@@ -1458,24 +1472,15 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
                     "jev_unavailable: no API key or network disabled; kept every block (fail-safe)"
                 )
             else:
+                # Plain text under auto (segments with auto never get here): the mechanical
+                # fallback it always had.
                 degraded = True
                 semantic_guarantee = "none"
-                # With trusted block metadata the local default is the specialist ranker;
-                # plain text (no metadata) keeps the mechanical fallback it always had.
-                if request.segments is not None and request.decisions_cache_path is None:
-                    specialist_judge = _load_specialist(warnings)
-                if specialist_judge is not None:
-                    degradation_reason = "jev_unavailable_specialist_fallback"
-                    warnings.append(
-                        "jev_unavailable: fell back to the local specialist-v3 ranker; semantic "
-                        "judgment is unavailable (degraded)"
-                    )
-                else:
-                    degradation_reason = "jev_unavailable_mechanical_fallback"
-                    warnings.append(
-                        "jev_unavailable: fell back to mechanical scoring; semantic judgment is "
-                        "unavailable (degraded)"
-                    )
+                degradation_reason = "jev_unavailable_mechanical_fallback"
+                warnings.append(
+                    "jev_unavailable: fell back to mechanical scoring; semantic judgment is "
+                    "unavailable (degraded)"
+                )
         elif request.jev_model and hasattr(client, "model"):
             client.model = request.jev_model
     elif provider_requested == "laya":

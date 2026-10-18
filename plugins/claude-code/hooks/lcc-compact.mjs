@@ -78,7 +78,8 @@ export const register = (on, options) => {
         notify($, `lcc: built-in summary (${decision.reason})`);
         return next(event);
       }
-      notify($, `lcc: verbatim compaction, no summary (${decision.reason})`);
+      const via = payload.report?.provider_used ?? configured.provider;
+      notify($, `lcc: verbatim compaction via ${via}, no summary (${decision.reason})`);
       return { messages: toSessionMessages(payload.messages) };
     } catch (error) {
       notify($, `lcc: built-in summary (${message(error)})`);

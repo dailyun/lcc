@@ -915,7 +915,8 @@ def request_log_command(
         return
     console.print(
         f"{summary['path']}: {summary['total']} entries, {summary['sessions']} sessions, "
-        f"by language {summary['by_language']} (enabled: {summary['enabled']})"
+        f"by language {summary['by_language']}, by provider {summary['by_provider']} "
+        f"(enabled: {summary['enabled']})"
     )
 
 
@@ -1102,6 +1103,15 @@ def _compact_tool_calls(
         _fail(str(exc), code=2)
 
     report = result.report
+    from lcc.request_log import log_request
+
+    # opt-in via LCC_REQUEST_LOG=1; goal and provider labels only, never INPUT
+    log_request(
+        question,
+        tool="cli:compact",
+        provider=report["provider_used"],
+        degradation_reason=report["degradation_reason"],
+    )
     if not dry_run:
         rendered = json.dumps(messages_to_payload(result.messages), indent=2, ensure_ascii=False)
         if output_path is not None:
@@ -1218,8 +1228,10 @@ def compact_command(
             "What to compact. 'blocks' (default): text blocks inside INPUT. 'tool-calls': "
             "INPUT is a session transcript (JSON messages array or {'messages': [...]}) and "
             "the unit of decision is a tool call paired with its result; user and assistant "
-            "text is never scored, trimmed or rewritten. Needs --provider jev/laya/auto, or "
-            "'rules' (offline deterministic policy, no key, no model). "
+            "text is never scored, trimmed or rewritten. Needs --provider jev/laya/auto, "
+            "'rules' (offline deterministic policy, no key, no model) or 'specialist-v3' "
+            "(local ranker; what auto uses in this mode). Jev and laya (deprecated) run "
+            "only when named. "
             "See docs/TOOL_CALLS.md."
         ),
     ),
@@ -1480,11 +1492,11 @@ def compact_command(
     """Drop context blocks irrelevant to OBJECTIVE (opt-in narrow model judgment; fails safe)."""
     # 'rules' is the offline tool-call policy; it has no block-mode equivalent.
     if provider not in ("auto", "jev", "nimble", "laya", "mechanical") and not (
-        provider == "rules" and mode == "tool-calls"
+        provider in ("rules", "specialist-v3") and mode == "tool-calls"
     ):
         _fail(
             f"unknown provider {provider!r}; expected auto, jev, nimble, laya, or mechanical "
-            "('rules' only with --mode tool-calls).",
+            "('rules' and 'specialist-v3' only with --mode tool-calls).",
             code=2,
         )
     if not 0.0 <= threshold <= 1.0:

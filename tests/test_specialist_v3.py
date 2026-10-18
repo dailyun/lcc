@@ -140,13 +140,19 @@ def test_specialist_drops_only_unprotected_blocks_within_budget():
 
 
 def test_auto_uses_specialist_only_with_structured_metadata(monkeypatch):
-    monkeypatch.setattr(compactor, "_resolve_client", lambda: None)
+    # With segments, auto is specialist-v3 ahead of Jev: Jev is never even resolved.
+    def no_jev():
+        raise AssertionError("auto with segments must not resolve Jev")
+
+    monkeypatch.setattr(compactor, "_resolve_client", no_jev)
     text, segments = _rendered(11, 4)
     with_meta = compact_context(
         RelevanceCompactionRequest(text=text, question=GOAL, segments=segments)
     )
     assert with_meta.report.provider_used == "specialist-v3"
-    assert with_meta.report.degradation_reason == "jev_unavailable_specialist_fallback"
+    assert with_meta.report.degraded is False
+    assert with_meta.report.degradation_reason is None
+    monkeypatch.setattr(compactor, "_resolve_client", lambda: None)
     plain = compact_context(RelevanceCompactionRequest(text=text, question=GOAL))
     assert plain.report.provider_used == "mechanical"
     assert plain.report.degradation_reason == "jev_unavailable_mechanical_fallback"

@@ -7,7 +7,8 @@
 export const DEFAULT_OPTIONS = {
   server: "lcc",
   question: "",
-  provider: "jev",
+  // 'auto' is the local specialist-v3 ranker; 'jev' (remote) is opt-in.
+  provider: "auto",
   threshold: 0.5,
   preserveRecentMessages: 6,
   trimHeadChars: 300,
@@ -31,9 +32,9 @@ export function resolveOptions(options = {}) {
   const merged = { ...DEFAULT_OPTIONS };
   if (options.server) merged.server = String(options.server);
   if (options.question) merged.question = String(options.question);
-  // The MCP tool accepts jev | laya | auto | rules; anything else falls back to the
-  // default rather than sending a value the tool would reject.
-  if (["jev", "laya", "auto", "rules"].includes(String(options.provider))) {
+  // The MCP tool accepts jev | laya | auto | rules | specialist-v3; anything else falls back
+  // to the default rather than sending a value the tool would reject.
+  if (["jev", "laya", "auto", "rules", "specialist-v3"].includes(String(options.provider))) {
     merged.provider = String(options.provider);
   }
   if (["lossless", "lossy", "recoverable"].includes(String(options.rulesMode))) {

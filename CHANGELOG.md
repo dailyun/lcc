@@ -13,10 +13,35 @@ All notable changes to this project are documented here. The format is based on
   lowest-ranked until `specialist_drop_fraction` (default 0.3) of candidate characters is gone.
   LCC's protection rules run first, and deterministic-protection and high-risk blocks are never
   dropped. Block metadata (message index, role, kind, tool) comes from trusted
-  `segments` (`render_transcript`), never from text. `auto` uses it instead of mechanical
-  when Jev is unavailable and segments are given; plain text keeps the mechanical fallback.
+  `segments` (`render_transcript`), never from text. `auto` uses it whenever segments are
+  given (see Changed); plain text keeps the Jev/mechanical path.
   The model's sha256 is checked at load, and a mismatch falls back to mechanical. Held-out results and
   limits: [docs/SPECIALIST.md](docs/SPECIALIST.md).
+
+### Changed
+
+- **Behaviour change: `auto` is now specialist-v3 whenever structured transcript blocks are
+  present**, ahead of Jev and Laya. That covers block compaction with `segments` and every
+  tool-call path (Claude Code hook, MCP `compact_transcript`, `lcc compact --mode
+  tool-calls`), which always have them. Jev runs only when named (`provider: jev`, the
+  plugin's `provider` setting, `--provider jev`); a key alone no longer selects it. Plain-text
+  `auto` is unchanged (Jev, else mechanical). The plugin and MCP `compact_transcript` default
+  changes from `jev` to `auto`. To restore the old behaviour set `provider` to `jev`.
+  Evidence (INFERIDO): held-out, v3 ties Opus on recall and beats Gemini Flash on all-kept;
+  dev (43 sessions, optimistic) v3 0.886 vs Jev 0.818 recall AUC; Jev was not run on the
+  held-out set. See [docs/SPECIALIST.md](docs/SPECIALIST.md).
+- **Tool-call mode with specialist-v3:** the transcript is rendered with trusted segments,
+  block compaction runs unchanged, and a call is dropped only when every block of its call
+  and result was dropped (trimmed when only the result was). Text is never touched. Any
+  ranker error keeps every call (`specialist_v3_failed_fail_safe`). `rules`
+  (`lossless` default) is unchanged.
+- The request log records `provider` and `degradation_reason` (labels only) for tool-call
+  compaction, and `lcc request-log` counts entries by provider.
+
+### Deprecated
+
+- **Laya (`provider: laya`).** No automatic or fallback path selects it (none did for block
+  mode; it is now stated). It still runs when named. Removal is planned for a later release.
 
 ### Security
 

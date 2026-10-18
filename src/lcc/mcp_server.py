@@ -76,11 +76,12 @@ def _tool_compact_transcript(args: dict[str, Any]) -> dict[str, Any]:
     question = args.get("question", "")
     if not isinstance(question, str) or not question.strip():
         raise ValueError("compact_transcript requires non-empty 'question'")
-    provider = args.get("provider", "jev")
-    if provider not in ("auto", "jev", "laya", "rules"):
+    provider = args.get("provider", "auto")
+    if provider not in ("auto", "jev", "laya", "rules", "specialist-v3"):
         raise ValueError(
             "compact_transcript needs a semantic judge or the rules policy: use 'laya' "
-            "(local, offline), 'jev', 'auto', or 'rules' (offline deterministic policy) — "
+            "(local, offline), 'jev', 'auto', 'rules' (offline deterministic policy) or "
+            "'specialist-v3' (offline local ranker) — "
             "'mechanical' scores lexical overlap, which cannot say whether a tool's work "
             "is finished"
         )
@@ -240,7 +241,7 @@ TOOLS: dict[str, dict[str, Any]] = {
             "Tool-call compaction for a session transcript: pairs each tool call with its "
             "result, pins the first and newest messages, and drops the pairs a semantic "
             "judge says are spent — kept messages stay verbatim, so nothing is summarized. "
-            "Provider 'laya' runs locally and offline (needs the [laya] extra); 'jev' is "
+            "Default 'auto' is the local specialist-v3 ranker (offline, no key); 'jev' is "
             "remote and needs TYPESAFE_API_KEY. Every failure keeps the call."
         ),
         "schema": {
@@ -257,13 +258,15 @@ TOOLS: dict[str, dict[str, Any]] = {
                 "question": {"type": "string"},
                 "provider": {
                     "type": "string",
-                    "enum": ["jev", "laya", "auto", "rules"],
-                    "default": "jev",
+                    "enum": ["jev", "laya", "auto", "rules", "specialist-v3"],
+                    "default": "auto",
                     "description": (
-                        "Semantic judge. 'laya' is local and offline (needs the [laya] "
-                        "extra); 'jev' is the remote TypeSafe System 1 and needs "
-                        "TYPESAFE_API_KEY. 'auto' prefers Jev. 'rules' is an offline "
-                        "deterministic policy (no key, no model); see rules_mode."
+                        "'auto' (default) and 'specialist-v3' use the local CPU ranker "
+                        "(no key, no network; ranks, does not judge). 'jev' is the remote "
+                        "TypeSafe System 1, needs TYPESAFE_API_KEY, and runs only when "
+                        "named. 'laya' is DEPRECATED (local, needs the [laya] extra) and "
+                        "runs only when named. 'rules' is an offline deterministic policy "
+                        "(no key, no model); see rules_mode."
                     ),
                 },
                 "rules_mode": {
@@ -435,11 +438,23 @@ def handle_message(message: dict[str, Any]) -> dict[str, Any] | None:
         # Opt-in (LCC_REQUEST_LOG=1): logs the redacted goal only, after the output exists.
         from lcc.request_log import log_request
 
+        # compact_transcript also records which provider ran and why it degraded (fixed
+        # labels from the report, never content), so the hook's choice is visible in the log.
+        report = output.get("report") if name == "compact_transcript" else None
+        extra = (
+            {
+                "provider": report.get("provider_used"),
+                "degradation_reason": report.get("degradation_reason"),
+            }
+            if isinstance(report, dict)
+            else {}
+        )
         log_request(
             arguments.get("question"),
             tool=f"mcp:{name}",
             field=arguments.get("field"),
             language=arguments.get("language"),
+            **extra,
         )
         return _result(
             request_id, {"content": [{"type": "text", "text": json.dumps(output)}]}

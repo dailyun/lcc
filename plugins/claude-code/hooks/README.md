@@ -1,8 +1,8 @@
 # lcc — Claude Code plugin
 
 Replaces Claude Code's compaction summary with **verbatim** compaction: every tool call is
-paired with its result, a judge (TypeSafe Jev by default, local Laya, or the offline `rules`
-policy) decides whether the call and its output are still needed, and the pairs it marks
+paired with its result, a judge (the local `specialist-v3` ranker by default, TypeSafe Jev on opt-in, deprecated
+Laya on opt-in, or the offline `rules` policy) decides whether the call and its output are still needed, and the pairs it marks
 spent are dropped or trimmed. Nothing is summarized, nothing is
 rewritten — kept messages carry their original bytes, and user/assistant text is never
 touched at all.
@@ -24,8 +24,8 @@ claude plugin install lcc@lcc
 ```
 
 Requirements: Claude Code **2.1.274 or newer** (function hooks), the `lcc` CLI on `PATH`
-(the plugin's `.mcp.json` starts `lcc mcp`), and a TypeSafe API key for `provider: jev` or
-`auto` (`laya` and `rules` need none).
+(the plugin's `.mcp.json` starts `lcc mcp`), and a TypeSafe API key only for `provider: jev`
+(`auto`/`specialist-v3`, `laya` and `rules` need none).
 
 For local development against a checkout:
 
@@ -44,7 +44,7 @@ The plugin registers one hook:
 Every outcome is reported in one toast and one log line, and each per-call decision is in
 the report the tool returns:
 
-- `lcc: verbatim compaction, no summary (kept N messages, dropped D tool call(s), trimmed T, deduped P, replaced R)`
+- `lcc: verbatim compaction via PROVIDER, no summary (kept N messages, dropped D tool call(s), trimmed T, deduped P, replaced R)`
 - `lcc: built-in summary (the pass removed no tool output)`
 - `lcc: built-in summary (below the 25% minimum (4.2%))`
 - `lcc: built-in summary (judge unavailable (jev_unavailable_fail_safe))`
@@ -60,11 +60,16 @@ server default. With `recoverable` the hook sends the session's working director
 directory is the event's `cwd` field when it is an absolute path, else the hook process's
 `process.cwd()` (function hooks run inside the session's process).
 
+`provider` defaults to `auto`, which is the local `specialist-v3` ranker (offline, no key);
+`specialist-v3` names it explicitly. Jev runs only with `provider: jev`, and Laya (deprecated)
+only with `provider: laya`. Any ranker error keeps every call (`degraded: true`) and the hook
+stands down. See [`docs/SPECIALIST.md`](../../../docs/SPECIALIST.md).
+
 ## Fallback is the default when anything is off
 
 The hook stands down — and Claude Code compacts the way it always did — when:
 
-- there is no key, the network is disabled, or every batch fails (`degraded: true`);
+- the judge or ranker is unavailable, or every batch fails (`degraded: true`);
 - the conversation cannot be shown to the judge inside `--max-state-tokens`;
 - the pass removed less than `minReductionRatio` of the transcript;
 - a message carries content this hook cannot rebuild from `role`, `text` and tool blocks

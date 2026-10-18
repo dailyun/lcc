@@ -10,21 +10,90 @@ next", not "is this block relevant to the question", so reports always say
 
 ## When it runs
 
+`auto` uses v3 whenever the caller passes structured transcript blocks (`segments`), ahead
+of Jev and Laya. Jev runs only when named (`provider="jev"`); Laya is deprecated and runs only
+when named (`provider="laya"`); no automatic or fallback path selects either.
+
 | Request | Provider used |
 | --- | --- |
+| `provider="auto"` with `segments`, no decision cache | `specialist-v3`, `degraded: false` (Jev is not even resolved) |
+| `provider="auto"`, plain text | Jev when available, else `mechanical` (unchanged; never Laya) |
 | `provider="specialist-v3"` with `segments` | `specialist-v3` |
 | `provider="specialist-v3"` without `segments` | `specialist-v3`, with warning `specialist_v3_no_block_metadata` (every block has unknown role/kind/tool, which the model never saw in training) |
-| `provider="auto"`, Jev unavailable, `segments` given, no decision cache | `specialist-v3`, `degraded: true`, `jev_unavailable_specialist_fallback` |
-| `provider="auto"`, Jev unavailable, plain text | `mechanical`, as before |
+| `provider="jev"` / `provider="laya"` | that judge, as before (opt-in) |
 | model file missing, altered (sha256 mismatch) or unreadable | `specialist-v3+mechanical_fallback`, `degraded: true`, warning plus a log line on `lcc.relevance` |
 
-So v3 is the default local path only when the caller passes structured transcript blocks.
-Plain-text compaction keeps the mechanical fallback: v3 was trained and evaluated only on
+Plain-text compaction keeps the Jev/mechanical behaviour: v3 was trained and evaluated only on
 rendered transcripts with block metadata.
 
 The old `provider="specialist"` is unchanged. It is a shadow seam for an injected ranker, it
 never drops, and the real-session benchmark harness uses it. Reusing that name for a provider
 that drops blocks would silently change what those callers get.
+
+### Why v3 is the default ahead of Jev (INFERIDO)
+
+- Held-out final test (36 sessions, LLM subset below): v3 ties Opus on recall AUC
+  (0.876 vs 0.884, difference −0.009 [−0.055, +0.031]) and beats Gemini Flash on all-kept AUC
+  (+0.118 [+0.026, +0.220]).
+- Dev set (43 sessions, the maintainer's measurement, not reproduced in this repo): v3 0.886
+  vs Jev 0.818 recall AUC. Dev numbers are optimistic: the same sessions informed v3's
+  configuration.
+- Jev was not measured on the held-out set (paid API), so "v3 ≥ Jev" rests on the dev set only.
+- Cost: v3 is local, free and has no network dependency; Jev needs a key and a network call
+  per batch; Laya is slow on CPU and its 512/1024-token window fits few transcripts.
+
+## Tool-call compaction and the Claude Code hook
+
+`compact_transcript` (the Claude Code hook, the MCP tool and `lcc compact --mode tool-calls`)
+always has structured messages, so `auto`, the default on all three, is v3:
+
+| Request | Provider used |
+| --- | --- |
+| `provider="auto"` (default) or `"specialist-v3"` | `specialist-v3`, `degraded: false`; Jev and Laya are never resolved |
+| `provider="jev"` | Jev; without a key every call is kept, `jev_unavailable_fail_safe` (unchanged) |
+| `provider="laya"` (deprecated) | Laya, as before |
+| `provider="rules"` | the offline policy, unchanged (`lossless` default) |
+| ranker error (model missing/altered, any exception) | every call kept, `degraded: true`, `specialist_v3_failed_fail_safe` |
+
+Tool-call mode has no lexical fallback (mechanical is refused there), so the fail-closed
+outcome on this path is "keep every call", and the hook then stands down to Claude Code's own
+summary.
+
+How a call is decided: the transcript is rendered with `render_transcript`, block
+compaction runs with `provider="specialist-v3"` and the segments (so every protection rule
+applies unchanged), then each unpinned call maps back by character span. If every block of
+the call and of its result was dropped, the pair is dropped; if only the result's blocks
+were, the result is trimmed to `trim_head_chars`; otherwise the pair is kept. User and
+assistant text is never touched, even when the ranker would drop it, so a pass removes less
+than `specialist_drop_fraction`. Short blocks are protected, so a call's own (short) input
+block usually survives and the typical outcome is a trim, not a drop. On the synthetic
+transcripts in `tests/specialist_synthetic.py` the pass removed 5–7% of the characters,
+below the hook's default `minReductionRatio` of 0.25; real sessions, where tool output
+dominates, were not measured here.
+
+### Enable it in Claude Code
+
+It is the plugin's default (`provider: auto`) once the plugin and the `lcc` package are
+updated. To pin it explicitly: `/plugin` → lcc → configure `provider` = `specialist-v3`, or
+`claude plugin install lcc@lcc --config provider=specialist-v3`. To go back to Jev, set
+`provider` = `jev`. Lower `minReductionRatio` if passes keep falling below it. The toast
+reads `lcc: verbatim compaction via specialist-v3, ...` when v3 ran.
+
+### Verify it is active
+
+Start Claude Code with `LCC_REQUEST_LOG=1` in its environment (the plugin's `lcc mcp`
+server inherits it; `LCC_REQUEST_LOG_DIR` picks the directory, default `./.lcc/request-log`
+relative to the server's working directory). Each `compact_transcript` call appends an entry
+with `"provider"` (`specialist-v3`, `jev`, `degraded`, ...) and `"degradation_reason"`
+(e.g. `specialist_v3_failed_fail_safe`, or `"none"`). Labels only, no content. Then:
+
+```bash
+lcc request-log          # ... by provider {'specialist-v3': 3} ...
+lcc request-log --json   # "by_provider": {"specialist-v3": 3}
+```
+
+From the command line: `lcc compact session.json --mode tool-calls -r r.json --dry-run` and
+check `provider_used` in `r.json`.
 
 ## Usage
 

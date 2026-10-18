@@ -8,8 +8,8 @@ them. Modes:
 - ``provider="mechanical"``: fully local fallback that only drops blocks with zero lexical
   overlap with the objective. Used automatically when no API key is configured.
 - ``provider="specialist-v3"``: frozen local ranker over structured transcript blocks
-  (``segments`` from :func:`render_transcript`). ``auto`` uses it instead of mechanical when
-  Jev is unavailable and segments are given. See ``docs/SPECIALIST.md``.
+  (``segments`` from :func:`render_transcript`). ``auto`` uses it, ahead of Jev, whenever
+  segments are given. See ``docs/SPECIALIST.md``.
 
 Everything is conservative: kept bytes are re-emitted exactly, blocks that are short or
 match ``keep_patterns`` are never scored, and any failure keeps content rather than
