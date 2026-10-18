@@ -17,14 +17,14 @@ when named (`provider="laya"`); no automatic or fallback path selects either.
 | Request | Provider used |
 | --- | --- |
 | `provider="auto"` with `segments`, no decision cache | `specialist-v3`, `degraded: false` (Jev is not even resolved) |
-| `provider="auto"`, plain text | Jev when available, else `mechanical` (unchanged; never Laya) |
+| `provider="auto"`, plain text | `mechanical`, `degraded: false` (never Jev, even with a key; never Laya) |
 | `provider="specialist-v3"` with `segments` | `specialist-v3` |
 | `provider="specialist-v3"` without `segments` | `specialist-v3`, with warning `specialist_v3_no_block_metadata` (every block has unknown role/kind/tool, which the model never saw in training) |
 | `provider="jev"` / `provider="laya"` | that judge, as before (opt-in) |
 | model file missing, altered (sha256 mismatch) or unreadable | `specialist-v3+mechanical_fallback`, `degraded: true`, warning plus a log line on `lcc.relevance` |
 
-Plain-text compaction keeps the Jev/mechanical behaviour: v3 was trained and evaluated only on
-rendered transcripts with block metadata.
+Plain-text compaction under `auto` uses the local `mechanical` scorer: v3 was trained and
+evaluated only on rendered transcripts with block metadata.
 
 The old `provider="specialist"` is unchanged. It is a shadow seam for an injected ranker, it
 never drops, and the real-session benchmark harness uses it. Reusing that name for a provider

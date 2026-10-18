@@ -74,15 +74,15 @@ lcc compact transcript.json -q "finish the parser fix" --mode tool-calls \
 | Provider | Runs | When it is used | Report says |
 | --- | --- | --- | --- |
 | `specialist-v3` | local, CPU | default (`auto`) whenever transcript blocks are present: the Claude Code hook, `compact_transcript`, `--mode tool-calls` | `semantic_guarantee: none` (a rank, not a judgment) |
-| `mechanical` | local, CPU | `--provider mechanical`; plain text under `auto` when no TypeSafe key is configured | `semantic_guarantee: none` |
+| `mechanical` | local, CPU | default (`auto`) for plain text, or `--provider mechanical` | `semantic_guarantee: none` |
 | `rules` (`lossless`, `recoverable`) | local, no model | `provider: rules` for transcripts | `lossless`: only provable duplicates removed; `recoverable`: also outputs that can be re-read |
 | `jev` | remote (TypeSafe API) | opt-in: `--provider jev` / `provider: jev`, needs `TYPESAFE_API_KEY` | semantic judgment or explicit degradation |
 | `laya` | local model | deprecated; runs only when named | named model and fallback state |
 
 `specialist-v3` details and limits: [SPECIALIST.md](docs/SPECIALIST.md). Rules modes:
 [TOOL_CALLS.md](docs/TOOL_CALLS.md). Jev is an optional path you name explicitly
-(`--provider jev`); it sends the objective and context blocks to the TypeSafe API, and
-`LCC_DISABLE_NETWORK=1` disables it. `compact` writes a `relevance-compaction-1.2` report;
+(`--provider jev`); `auto` never selects it, even with a key configured. It sends the
+objective and context blocks to the TypeSafe API; `LCC_DISABLE_NETWORK=1` disables it. `compact` writes a `relevance-compaction-1.2` report;
 check `provider_used` and `degraded` before trusting the output.
 
 ## Benchmarks
@@ -132,7 +132,7 @@ pass as not worth it, and the Claude Code plugin keeps the built-in summary.
 - Protection rules and bounded restoration reduce, but do not rule out, lost evidence; see the
   [safety model](docs/adr/0014-minimum-sufficient-context.md).
 - `specialist-v3` was trained on Claude Code transcripts. Other agents and plain documents are
-  out of distribution; plain text uses `mechanical` unless a TypeSafe key is configured.
+  out of distribution; plain text uses `mechanical`.
 
 ## Docs
 

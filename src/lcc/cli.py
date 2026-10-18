@@ -1268,23 +1268,15 @@ def compact_command(
         "auto",
         "--provider",
         help=(
-            "Scoring provider. 'mechanical': fully local lexical baseline, no key/no "
-            "network, unbounded context, most aggressive reduction but heuristic only "
-            "(semantic_guarantee=none) — use for offline/CI or huge dossiers. 'laya': "
-            "local non-autoregressive semantic judge (Apache 2.0, 100% offline, 512/1024 "
-            "token budget), more conservative than mechanical with a real semantic pass "
-            "(semantic_guarantee=judged) — use when you want semantics without a key. "
-            "'jev': remote TypeSafe System 1 (32K context, needs TYPESAFE_API_KEY), "
-            "strongest semantic judgment — use when recall on subtle evidence matters "
-            "most. 'nimble': local open System 1 (Bespoke Nimble 9B, Apache 2.0, 100% "
-            "offline, 8,192-token budget), stronger zero-shot judgment than Laya but "
-            "needs ~18GB weights plus Apple Silicon or an NVIDIA BF16 GPU "
-            "(semantic_guarantee=judged) — use when you want the best local semantics "
-            "and have the hardware. 'auto' prefers Jev, falls back to mechanical "
-            "with degraded:true. "
-            "Missing Laya extra falls back to mechanical as laya+mechanical_fallback "
-            "(degraded:true); missing Nimble checkout as nimble+mechanical_fallback. "
-            "See docs/NIMBLE.md for the decision table."
+            "Scoring provider. 'auto' (default): local only, no key and no network: the "
+            "specialist-v3 ranker when transcript blocks are present (--mode tool-calls), "
+            "'mechanical' lexical scoring otherwise; never Jev, even with a key. "
+            "'mechanical': local lexical baseline (semantic_guarantee=none). "
+            "'specialist-v3' and 'rules' (offline policy): --mode tool-calls only. "
+            "'jev': opt-in remote TypeSafe judge, needs TYPESAFE_API_KEY; without it every "
+            "block is kept (degraded:true). 'laya': deprecated local model, runs only when "
+            "named; a missing extra falls back to mechanical (degraded:true). 'nimble': no "
+            "scorer is wired in this package; falls back to mechanical (degraded:true)."
         ),
     ),
     model: str = typer.Option(
@@ -1335,9 +1327,9 @@ def compact_command(
         "bespokelabs/Bespoke-Nimble-9B",
         "--nimble-model",
         help=(
-            "Nimble checkpoint (model id or local merged directory from docs/NIMBLE.md; "
+            "Nimble checkpoint (model id or local merged directory; "
             "8,192-token window). Without the checkout + weights, --provider nimble "
-            "falls back to mechanical (degraded:true). Details: docs/NIMBLE.md."
+            "falls back to mechanical (degraded:true)."
         ),
     ),
     nimble_backend: str | None = typer.Option(

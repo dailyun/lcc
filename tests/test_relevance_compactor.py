@@ -338,16 +338,19 @@ def test_reduction_ratio_and_low_reduction_flag():
 # --- hardening: honest degradation, stable markers, cache-epoch accounting ----------------
 
 
-def test_auto_fallback_reports_degraded_and_no_semantic_guarantee(monkeypatch):
-    """``auto`` may fall back to mechanical scoring, but it may not hide it."""
-    monkeypatch.setattr("lcc.relevance.compactor._resolve_client", lambda: None)
+def test_auto_plain_text_is_local_mechanical_even_with_a_key(monkeypatch):
+    """Plain-text ``auto`` is the local mechanical scorer; Jev runs only when named."""
+
+    def no_jev():
+        raise AssertionError("auto on plain text must not resolve Jev")
+
+    monkeypatch.setattr("lcc.relevance.compactor._resolve_client", no_jev)
     result = compact_context(_request(provider="auto", client=None, question="zzz"))
     report = result.report
     assert report.provider_used == "mechanical"
-    assert report.degraded is True
-    assert report.degradation_reason == "jev_unavailable_mechanical_fallback"
+    assert report.degraded is False
+    assert report.degradation_reason is None
     assert report.semantic_guarantee == "none"
-    assert any("degraded" in w for w in report.warnings)
 
 
 def test_explicit_jev_unavailable_fails_safe_with_reason(monkeypatch):

@@ -152,10 +152,9 @@ def test_auto_uses_specialist_only_with_structured_metadata(monkeypatch):
     assert with_meta.report.provider_used == "specialist-v3"
     assert with_meta.report.degraded is False
     assert with_meta.report.degradation_reason is None
-    monkeypatch.setattr(compactor, "_resolve_client", lambda: None)
     plain = compact_context(RelevanceCompactionRequest(text=text, question=GOAL))
-    assert plain.report.provider_used == "mechanical"
-    assert plain.report.degradation_reason == "jev_unavailable_mechanical_fallback"
+    assert plain.report.provider_used == "mechanical"  # local; Jev still never resolved
+    assert plain.report.degradation_reason is None
 
 
 def test_specialist_refuses_decision_cache(tmp_path):

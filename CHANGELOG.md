@@ -6,15 +6,32 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- **Plain-text `provider="auto"` is now local only and never selects Jev**, even when a
+  TypeSafe key is configured. It runs the `mechanical` scorer with `degraded: false` (it used
+  to call Jev when a key resolved, and report `jev_unavailable_mechanical_fallback` when none
+  did). With transcript blocks, `auto` stays `specialist-v3`. Jev now runs only when named
+  (`--provider jev` / `provider: jev`); Laya stays deprecated and runs only when named. To
+  keep the old behaviour, pass `provider="jev"` explicitly.
+- `lcc compact --provider` help, `docs/QUICKSTART.md`, `docs/CLAUDE_CODE.md`, `docs/MCP.md`,
+  `docs/JEV.md`, `docs/LAYA.md` and `docs/SPECIALIST.md` describe the local default; the
+  dangling NIMBLE.md references in the CLI help are removed (`nimble` still falls back
+  to mechanical).
+- README rewritten: local default, quickstart, providers table, benchmark headlines.
+
 ### Added
 
+- **`benchmarks/run_judge_bench.py`: synthetic local judge benchmark** (specialist-v3,
+  mechanical, bm25, recency, random; rules and full-pass arms), documented in
+  `docs/BENCHMARKS.md`, run in CI with `--check`.
 - **`provider="specialist-v3"`: a local block ranker for agent transcripts.** A frozen
   LR + boosted-tree model (183 KB, plain Python, no new dependency) ranks blocks and drops the
   lowest-ranked until `specialist_drop_fraction` (default 0.3) of candidate characters is gone.
   LCC's protection rules run first, and deterministic-protection and high-risk blocks are never
   dropped. Block metadata (message index, role, kind, tool) comes from trusted
   `segments` (`render_transcript`), never from text. `auto` uses it whenever segments are
-  given (see Changed); plain text keeps the Jev/mechanical path.
+  given (see Changed); plain text under `auto` uses `mechanical`.
   The model's sha256 is checked at load, and a mismatch falls back to mechanical. Held-out results and
   limits: [docs/SPECIALIST.md](docs/SPECIALIST.md).
 

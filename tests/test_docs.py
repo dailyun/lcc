@@ -165,7 +165,7 @@ def test_jev_path_is_documented_consistently() -> None:
         # The opt-in boundary stays cited.
         "0013-instant-relevance-compaction-boundary.md",
         # Fallbacks must stay named, not silent.
-        "jev_unavailable_mechanical_fallback",
+        "never selects jev",
         "jev+mechanical_fallback",
         "degraded",
         # Measured numbers must point at the canonical file.

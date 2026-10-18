@@ -1,12 +1,11 @@
 # LCC in 5 minutes
 
 Install once, then pick the one command that matches your situation.
-The deterministic examples below run offline. Installing dependencies or
-staging local-model assets may use the network; Jev is an explicit remote path.
+Everything below runs locally by default: no key, no network, no external model.
+Installing dependencies may use the network; Jev is an opt-in remote path.
 
 ```bash
 pip install "local-context-compiler[tiktoken]"   # exact token counting (optional)
-pip install "local-context-compiler[laya]"       # local semantic judge (optional)
 ```
 
 ## 1. Clean a messy draft (60 seconds)
@@ -30,24 +29,20 @@ worth building at all (`skip` / `manual_review` / `optimize_safe`).
 ## 3. Drop what the objective doesn't need
 
 ```bash
-# No key, no network — lexical baseline:
-lcc compact dossier.md -q "reduce mobile booking friction" --provider mechanical -o compacted.md -r report.json
+# Default (auto): local lexical scoring for plain text, no key, no network:
+lcc compact dossier.md -q "reduce mobile booking friction" -o compacted.md -r report.json
 
-# No key, but want a real semantic pass (needs the [laya] extra):
-lcc compact dossier.md -q "reduce mobile booking friction" --provider laya -o compacted.md -r report.json
-
-# Key available — remote semantic judgment:
-lcc compact dossier.md -q "reduce mobile booking friction" --provider jev -o compacted.md -r report.json
+# Agent transcripts (auto = the local specialist-v3 ranker):
+lcc compact transcript.json -q "finish the parser fix" --mode tool-calls -o compacted.json -r report.json
 ```
 
-**Which provider?** `mechanical` = offline lexical heuristic.
-`laya` = local semantic judgment with staged assets. `jev` = remote
-semantic judgment. These descriptions are not a ranking of answer quality.
-Missing Laya extra falls back honestly to mechanical
-(`degraded: true`). Full table: `docs/LAYA.md`. Runnable comparison:
+**Which provider?** `auto` (default) is local only: `specialist-v3` for transcripts
+(`docs/SPECIALIST.md`), `mechanical` for plain text. It never selects Jev, even
+with a key configured. `jev` is an opt-in remote judge; `laya` is deprecated and
+runs only when named (`docs/LAYA.md`). Runnable comparison:
 `examples/compact_providers.py`.
 
-### The Jev path (when a key is available)
+### The Jev path (opt-in, needs a key)
 
 ```bash
 export TYPESAFE_API_KEY=...            # or ~/.config/lcc/typesafe.key, or the macOS keychain
@@ -60,7 +55,7 @@ lcc explain report.json --source dossier.md
 Jev judges blocks with typed questions instead of writing prose: kept blocks come
 back byte for byte, dropped ones are named in the report, and a missing key or a
 failed call degrades to a labelled fallback rather than dropping what it could not
-judge. No key? Use `mechanical` or `laya` above. Contract, key resolution and the
+judge. Without it, stay on the local default. Contract, key resolution and the
 fallback table: `docs/JEV.md`.
 
 ## 4. Long session without killing the prompt cache
@@ -122,8 +117,9 @@ match or not; the summary tells you. Never touches the network.
 | `prepare` | yes | no | inspect + lexical selection when safe |
 | `inspect` | yes | no | read-only diagnostic |
 | `compact --provider mechanical` | yes | no | lexical baseline; no semantic judgment |
-| `compact --provider laya` | yes (extra or honest fallback) | no | offline semantic; missing extra → `laya+mechanical_fallback`, `degraded: true` |
-| `compact --provider jev` / `auto` | falls back, never silent | yes for judgment | no key → `auto` falls back to mechanical, `jev` keeps everything (`degraded`) |
+| `compact` (`auto`) | yes | no | `mechanical` for plain text, `specialist-v3` with `--mode tool-calls` |
+| `compact --provider laya` (deprecated) | yes (extra or honest fallback) | no | missing extra → `laya+mechanical_fallback`, `degraded: true` |
+| `compact --provider jev` | falls back, never silent | yes | no key → keeps everything (`degraded`) |
 | `explain` / `inspect --ir` | yes | no | reads reports/IR only |
 | `diff` | yes | no | compares two files only |
 | `bench` | yes | no | mechanical metrics, not LLM quality |

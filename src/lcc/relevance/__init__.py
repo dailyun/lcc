@@ -3,13 +3,14 @@
 Drops context blocks that are irrelevant to an objective before a larger model ever sees
 them. Modes:
 
-- ``provider="jev"``/``"auto"``: narrow model judgment (TypeSafe System One, "Jev") scores
-  every candidate block in batches; blocks below ``threshold`` are dropped.
-- ``provider="mechanical"``: fully local fallback that only drops blocks with zero lexical
-  overlap with the objective. Used automatically when no API key is configured.
+- ``provider="auto"`` (default): local only. ``specialist-v3`` when ``segments`` are given,
+  ``mechanical`` otherwise. Never Jev, even with an API key configured.
 - ``provider="specialist-v3"``: frozen local ranker over structured transcript blocks
-  (``segments`` from :func:`render_transcript`). ``auto`` uses it, ahead of Jev, whenever
-  segments are given. See ``docs/SPECIALIST.md``.
+  (``segments`` from :func:`render_transcript`). See ``docs/SPECIALIST.md``.
+- ``provider="mechanical"``: local lexical scorer; drops blocks with low lexical overlap
+  with the objective.
+- ``provider="jev"``: opt-in remote judgment (TypeSafe System One, "Jev") scores every
+  candidate block in batches; blocks below ``threshold`` are dropped.
 
 Everything is conservative: kept bytes are re-emitted exactly, blocks that are short or
 match ``keep_patterns`` are never scored, and any failure keeps content rather than

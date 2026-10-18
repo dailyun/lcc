@@ -55,7 +55,7 @@ verify.
 | Situation | `provider_used` | `degraded` | `semantic_guarantee` | What happens |
 | :--- | :--- | :--- | :--- | :--- |
 | `--provider jev`, no key or network disabled | `degraded` | true | `none` | keeps every block (fail-safe) |
-| `--provider auto`, no key | `mechanical` scoring | true | `none` | mechanical pass, `degradation_reason: jev_unavailable_mechanical_fallback` |
+| `--provider auto` (plain text) | `mechanical` | false | `none` | local mechanical pass; `auto` never selects Jev, with or without a key |
 | a batch fails mid-run | `jev+mechanical_fallback` | true | `partial` (`none` when nothing was judged) | remaining blocks scored mechanically; already-judged blocks keep their Jev verdict |
 | state over the 32,768-token window | same as a failed batch | true | `partial` (`none` when nothing was judged) | refused **before** the call (`JevStateTooLargeError`, ledger `pre_flight:`) — no round trip is spent on `400 max_tokens_exceeded` |
 

@@ -279,7 +279,7 @@ class RelevanceCompactionReport:
     prefix_sha256: str
     output_sha256: str
     #: Why the run degraded, when ``degraded`` is true (``jev_unavailable``,
-    #: ``jev_unavailable_mechanical_fallback``, ``jev_batch_failed``).
+    #: ``jev_batch_failed``, ``specialist_v3_unavailable_mechanical_fallback``).
     degradation_reason: str | None = None
     #: What the pass can promise about semantic judgment: ``judged`` (every scored block was
     #: decided by the model provider), ``partial`` (some blocks fell back), or ``none``
@@ -1460,27 +1460,20 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
             degraded = True
             specialist_fallback_to_mechanical = True
             degradation_reason = "specialist_v3_unavailable_mechanical_fallback"
-    elif provider_requested in ("auto", "jev"):
+    elif provider_requested == "auto":
+        # Plain text (or a decision cache, which v3 refuses) under auto: the local mechanical
+        # scorer. Never Jev, even with a key configured; Jev runs only when named.
+        semantic_guarantee = "none"
+    elif provider_requested == "jev":
         client = request.client if request.client is not None else _resolve_client()
         if client is None:
-            if provider_requested == "jev":
-                degraded = True
-                provider_used = "degraded"
-                degradation_reason = "jev_unavailable"
-                semantic_guarantee = "none"
-                warnings.append(
-                    "jev_unavailable: no API key or network disabled; kept every block (fail-safe)"
-                )
-            else:
-                # Plain text under auto (segments with auto never get here): the mechanical
-                # fallback it always had.
-                degraded = True
-                semantic_guarantee = "none"
-                degradation_reason = "jev_unavailable_mechanical_fallback"
-                warnings.append(
-                    "jev_unavailable: fell back to mechanical scoring; semantic judgment is "
-                    "unavailable (degraded)"
-                )
+            degraded = True
+            provider_used = "degraded"
+            degradation_reason = "jev_unavailable"
+            semantic_guarantee = "none"
+            warnings.append(
+                "jev_unavailable: no API key or network disabled; kept every block (fail-safe)"
+            )
         elif request.jev_model and hasattr(client, "model"):
             client.model = request.jev_model
     elif provider_requested == "laya":
@@ -1632,7 +1625,7 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
                         semantic_guarantee = "partial"
                     else:
                         semantic_guarantee = "none"
-        elif client is not None and provider_requested in ("auto", "jev"):
+        elif client is not None and provider_requested == "jev":
             provider_used = "jev"
             jev_results, calls, latency_ms, jev_warnings, jev_resolved = _score_with_jev(
                 client, pending, request

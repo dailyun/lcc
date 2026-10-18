@@ -95,8 +95,8 @@ exact output still needed". In practice the transcript mode keys on `keep_call` 
 
 Treat the threshold as a floor, not a tuning knob you should chase: raising it does not
 add discrimination the checkpoint does not have. For borderline calls, `jev` with a
-32K window remains the stronger judge, and `--provider auto` prefers it when a key is
-present.
+32K window remains the stronger judge when you opt in with `--provider jev`; `--provider
+auto` stays local and never selects it.
 
 ### Degradation is one typed warning, not nine
 
@@ -151,7 +151,7 @@ provenance: `benchmarks/research/RESEARCH_STATUS.md`.
 | Offline, CI, huge dossier, max reduction, no new deps | `--provider mechanical` | Lexical baseline, unbounded context, drops only zero-overlap (+ safety net). `semantic_guarantee: none`. |
 | Offline **with** a real semantic pass, no API key | `--provider laya` | Local System 1 judgment inside a 512/1024 budget. More conservative than mechanical (keeps more), `semantic_guarantee: judged`, $0. |
 | Strongest judgment on subtle/paraphrased evidence, key available | `--provider jev` | Remote 32K System 1, best on nuance. Costs ~$0.001/call, needs `TYPESAFE_API_KEY`. |
-| Don't care, just work | `--provider auto` | Prefers Jev, falls back to mechanical with `degraded:true`. Explicit is better for audits. |
+| Don't care, just work | `--provider auto` | Local only: `specialist-v3` for transcripts, `mechanical` for plain text. Never Jev or Laya. |
 
 Decision shortcut:
 

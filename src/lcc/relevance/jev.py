@@ -1,8 +1,8 @@
 """Opt-in TypeSafe System One ("Jev") client for relevance compaction (ADR 0013).
 
 This module is the only place in ``lcc.relevance`` that may touch the network, and it is
-only reachable when the caller explicitly opts in (``--provider jev``/``auto`` or
-``enable_relevance=True``). It uses the standard library only, mirrors the shared TypeSafe
+only reachable when the caller explicitly opts in with ``provider="jev"`` (directly, or
+through intake's relevance pass). It uses the standard library only, mirrors the shared TypeSafe
 ledger schema used by the LookADev tool fleet, and fails closed: every error path raises a
 typed error so the compactor can fall back to a safer behavior.
 

@@ -216,9 +216,9 @@ TOOLS: dict[str, dict[str, Any]] = {
         "handler": _tool_compact,
         "description": (
             "Drop context blocks irrelevant to an objective. Default provider "
-            "mechanical is fully offline (no key, no network); laya is offline "
-            "semantic (needs the [laya] extra, else honest mechanical fallback); "
-            "jev needs TYPESAFE_API_KEY. Fail-safe: failures keep content."
+            "mechanical is fully offline (no key, no network); 'auto' is the same "
+            "local scorer and never selects Jev. 'jev' is opt-in and needs "
+            "TYPESAFE_API_KEY; 'laya' is deprecated. Fail-safe: failures keep content."
         ),
         "schema": {
             "type": "object",

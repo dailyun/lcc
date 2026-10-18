@@ -120,9 +120,10 @@ def test_network_disabled_fails_safe(monkeypatch):
     monkeypatch.setenv("LCC_DISABLE_NETWORK", "1")
     monkeypatch.setattr("lcc.relevance.compactor._resolve_client", lambda: None)
     result = compact_context(
-        RelevanceCompactionRequest(text=TEXT, question="booking funnel", provider="auto")
+        RelevanceCompactionRequest(text=TEXT, question="booking funnel", provider="jev")
     )
     assert result.report.degraded
+    assert result.compacted_text == TEXT
 
 
 def test_invalid_schema_answer_is_rejected():
