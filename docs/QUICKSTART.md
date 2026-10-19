@@ -126,6 +126,7 @@ match or not; the summary tells you. Never touches the network.
 | `compact --provider jev` / `auto` | falls back, never silent | yes for judgment | no key → `auto` falls back to mechanical, `jev` keeps everything (`degraded`) |
 | `explain` / `inspect --ir` | yes | no | reads reports/IR only |
 | `diff` | yes | no | compares two files only |
+| `share-stats` | yes | no | anonymous counts from local reports and the request log; sends nothing |
 | `bench` | yes | no | mechanical metrics, not LLM quality |
 | `intake` (no `--enable-relevance`) | yes | no | structuring only |
 | `intake --enable-relevance --relevance-provider jev` | no | yes | needs `TYPESAFE_API_KEY` |
@@ -155,3 +156,4 @@ at DEBUG); the CLI prints human summaries to stderr so stdout stays pipeable.
 | What is guaranteed deterministic? | `README.md` § Architectural Boundaries & ADRs 0001–0016 |
 | Full command reference? | `lcc --help`, `lcc compact --help` |
 | Connect an agent (Claude Code, etc.)? | `lcc mcp` — stdio server, see `docs/MCP.md` |
+| Beta tester sharing results? | `lcc share-stats reports/*.json`, see `docs/SHARE_STATS.md` |
