@@ -52,6 +52,7 @@ from lcc.relevance.ir import (
     summarize_ir,
 )
 from lcc.reporting.explain import render as render_explanation
+from lcc.reporting.explain import terminal_safe
 from lcc.reporting.report import report_to_dict, summary_rows, write_report
 from lcc.semantic_retrieval import (
     LOCAL_INDEX_V1_ADAPTER,
@@ -1280,8 +1281,8 @@ def compact_command(
             "offline, 8,192-token budget), stronger zero-shot judgment than Laya but "
             "needs ~18GB weights plus Apple Silicon or an NVIDIA BF16 GPU "
             "(semantic_guarantee=judged) — use when you want the best local semantics "
-            "and have the hardware. 'auto' prefers Jev, falls back to mechanical "
-            "with degraded:true. "
+            "and have the hardware. 'auto' stays local (mechanical, degraded:true) unless "
+            "LCC_AUTO_REMOTE=1 lets it use Jev when a key is configured. "
             "Missing Laya extra falls back to mechanical as laya+mechanical_fallback "
             "(degraded:true); missing Nimble checkout as nimble+mechanical_fallback. "
             "See docs/NIMBLE.md for the decision table."
@@ -1815,7 +1816,7 @@ def explain_cmd(
             rendered = render_ir_explanation(payload, only=only, limit=limit)
         except ValueError as exc:
             _fail(str(exc), code=2)
-        sys.stdout.write(rendered + "\n")
+        sys.stdout.write(terminal_safe(rendered) + "\n")
         return
     if "decisions" not in payload:
         _fail(
@@ -1839,7 +1840,7 @@ def explain_cmd(
         )
     except ValueError as exc:
         _fail(str(exc), code=2)
-    sys.stdout.write(rendered + "\n")
+    sys.stdout.write(terminal_safe(rendered) + "\n")
 
 
 @app.command(name="recall")
@@ -1906,7 +1907,10 @@ def intake_cmd(
     enable_relevance: bool = typer.Option(
         False,
         "--enable-relevance",
-        help="Opt in to instant relevance compaction (Jev-scored) before compilation.",
+        help=(
+            "Opt in to instant relevance compaction before compilation (local unless "
+            "--relevance-provider jev)."
+        ),
     ),
     relevance_threshold: float = typer.Option(
         0.4,

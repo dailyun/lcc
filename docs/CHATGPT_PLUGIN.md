@@ -58,6 +58,12 @@ or `laya` (including `compact_transcript` with no provider, which defaults to `j
 refused with JSON-RPC error `-32602`. This stops anyone who reaches the
 URL from spending your TypeSafe key or loading Laya weights on the host.
 
+Whatever the token, the server's disk is never reachable over HTTP: `rules_mode: "stashed"`,
+the `recall` tool, `workspace_root` (the recoverable disk check, which would read files a
+caller's transcript names and so confirm their existence and contents) and `laya_model` (a
+weights path or Hub id) are refused with `-32602`. Errors from a failing tool call come back
+as a bare `internal error`; the detail goes to the server log only.
+
 Set `LCC_HTTP_TOKEN` to require `Authorization: Bearer <token>` on `POST /mcp`. Requests
 without it get `401`; authenticated callers may pick any provider. `GET /health` and the
 domain-verification path stay open. Each request has a 30 s socket timeout.

@@ -6,6 +6,56 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Security
+
+- **HTTP server: no host-disk access.** `lcc mcp --http` now refuses `workspace_root` and
+  `laya_model` (as it already refused the stash and `recall`). With `provider: rules`,
+  `rules_mode: recoverable`, an anonymous caller could send a crafted transcript naming any
+  file on the server and read `replace_disk_verified` / `keep_disk_mismatch` /
+  `keep_disk_missing` back: a file-existence and file-content oracle on the host. A failing
+  tool call over HTTP now answers `internal error` without the exception text.
+- **MCP transports survive nested JSON.** A single deeply nested line (`[[[[…`) raised an
+  uncaught `RecursionError` and killed the stdio server (`lcc mcp`); it now gets a `-32700`
+  parse error and the server keeps serving. The HTTP server answers `400`.
+- **Regex/quadratic denial of service.** The speech-cleaning filler `\s+n[eé]\?` backtracked
+  quadratically on long blank runs (20 KB took 2 s; 1 MB would take over an hour); it now
+  runs in linear time with identical output. Near-duplicate paragraph detection compared
+  every pair with `difflib` (200 KB of similar-length paragraphs took minutes); it now
+  skips pairs on exact upper bounds (`real_quick_ratio`, `quick_ratio`), builds each kept
+  paragraph's index once, and stops under a deterministic work budget
+  (`NEAR_DUP_CHAR_BUDGET`), keeping the remaining paragraphs and adding a report warning.
+  Results below the budget are unchanged.
+- **`LCC_DISABLE_NETWORK=1` is honored everywhere.** The router's cloud solver (Fireworks /
+  OpenAI-compatible) and the local agent's non-loopback endpoints ignored it; both refuse now.
+- **`lcc explain` escapes terminal control characters** from reports and `--source` files
+  (ANSI/OSC escapes, carriage returns, 8-bit CSI), so untrusted tool output cannot recolour,
+  hide or rewrite what is printed, or set the terminal title or clipboard.
+- **Secrets in local logs.** Request-log redaction now covers secret names glued to longer
+  identifiers (`TYPESAFE_API_KEY=…`, `client_secret: …`) and `Cookie:` headers, and caps the
+  `field` value like the goal. The Jev ledger is created `0600` (was umask, usually
+  world-readable) and redacts bearer tokens and the API key from stored error bodies.
+- **Claude Code pin hook:** the last tool error is pinned inside a fence it cannot close and
+  labelled as quoted data, so an injected tool output cannot pose as instructions to the
+  built-in summarizer.
+- **Supply chain:** GitHub Actions are pinned to commit SHAs (version kept in a comment), the
+  CI workflow sets `permissions: contents: read`, both Docker images run as an unprivileged
+  user, and `.dockerignore` excludes `.env` files and keys.
+
+### Changed
+
+- **`auto` stays local for plain text.** `compact` / `lcc compact` / intake relevance with
+  `provider: auto` used to send context blocks to the TypeSafe API whenever a key resolved
+  (environment, `~/.config/lcc/typesafe.key`, a sibling `.env`, or the macOS Keychain), with
+  no explicit opt-in. It now scores with the local `mechanical` provider (report unchanged
+  from the no-key case: `degraded: true`, `jev_unavailable_mechanical_fallback`, plus an
+  `auto_local_only` warning). Escape hatch: name `--provider jev`, or set `LCC_AUTO_REMOTE=1`
+  to restore the old `auto` behaviour. Transcripts under `auto` were already local
+  (`specialist-v3`).
+
+### Fixed
+
+- `mypy` passes with and without `tiktoken` installed (no unused `type: ignore`).
+
 ## [1.2.0] - 2026-10-19
 
 ### Added

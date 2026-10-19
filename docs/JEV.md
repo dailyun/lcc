@@ -43,6 +43,7 @@ Resolution order, first hit wins:
 | `TYPESAFE_ENDPOINT` | System One endpoint (default `https://api.typesafe.ai/v1/systemone`) |
 | `TYPESAFE_MODEL` | model id (default `jev-latest`) |
 | `LCC_DISABLE_NETWORK=1` | kill switch: no client is built and no request leaves the machine |
+| `LCC_AUTO_REMOTE=1` | lets plain-text `--provider auto` use Jev when a key resolves; without it `auto` stays local |
 | `LCC_TS_LEDGER` | ledger path override; the ledger is written only when its directory exists, and write failures never break a pass |
 
 Retries: 408/425/429/500/502/503/504/529 and network errors are retried three times
@@ -55,7 +56,7 @@ verify.
 | Situation | `provider_used` | `degraded` | `semantic_guarantee` | What happens |
 | :--- | :--- | :--- | :--- | :--- |
 | `--provider jev`, no key or network disabled | `degraded` | true | `none` | keeps every block (fail-safe) |
-| `--provider auto`, no key | `mechanical` scoring | true | `none` | mechanical pass, `degradation_reason: jev_unavailable_mechanical_fallback` |
+| `--provider auto` (plain text), without `LCC_AUTO_REMOTE=1` or without a key | `mechanical` scoring | true | `none` | mechanical pass, `degradation_reason: jev_unavailable_mechanical_fallback`; a key alone never sends text (warning `auto_local_only`) |
 | a batch fails mid-run | `jev+mechanical_fallback` | true | `partial` (`none` when nothing was judged) | remaining blocks scored mechanically; already-judged blocks keep their Jev verdict |
 | state over the 32,768-token window | same as a failed batch | true | `partial` (`none` when nothing was judged) | refused **before** the call (`JevStateTooLargeError`, ledger `pre_flight:`) — no round trip is spent on `400 max_tokens_exceeded` |
 

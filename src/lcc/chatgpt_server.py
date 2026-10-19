@@ -182,19 +182,29 @@ _LOCAL_ONLY_TOOLS = frozenset({"recall"})
 
 
 def _local_only_refusal(payload: dict[str, Any]) -> dict[str, Any] | None:
-    """Refuse the stash over HTTP: it would write and serve one disk shared by every caller."""
+    """Refuse the server's disk over HTTP.
+
+    The stash would write and serve one disk shared by every caller, and ``workspace_root``
+    turns on the recoverable disk check, which reads files the caller's transcript names:
+    over HTTP that is a file-existence and file-content oracle on the server host.
+    """
     params = payload.get("params")
     if payload.get("method") != "tools/call" or not isinstance(params, dict):
         return None
     arguments = params.get("arguments")
     stashed = isinstance(arguments, dict) and arguments.get("rules_mode") == "stashed"
-    if params.get("name") not in _LOCAL_ONLY_TOOLS and not stashed:
+    # laya_model names a local path or Hub repo to load weights from: also the host's disk.
+    disk = isinstance(arguments, dict) and any(
+        bool(arguments.get(key)) for key in ("workspace_root", "laya_model")
+    )
+    if params.get("name") not in _LOCAL_ONLY_TOOLS and not stashed and not disk:
         return None
     return _error_response(
         payload.get("id"),
         -32602,
-        "the local stash (rules_mode 'stashed', tool 'recall') is only served over stdio "
-        "(`lcc mcp`), never over HTTP",
+        "the local disk (rules_mode 'stashed', tool 'recall', 'workspace_root', "
+        "'laya_model') is only "
+        "served over stdio (`lcc mcp`), never over HTTP",
     )
 
 
@@ -205,11 +215,15 @@ def _handle(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, bool]:
     notification (no response body exists, only ``202 Accepted``).
     """
     is_notification = "id" not in payload
-    response = (
-        _local_only_refusal(payload)
-        or _anonymous_provider_refusal(payload)
-        or handle_message(payload)
-    )
+    try:
+        response = (
+            _local_only_refusal(payload)
+            or _anonymous_provider_refusal(payload)
+            or handle_message(payload)
+        )
+    except Exception:  # never echo an exception (it may quote input or paths) to a caller
+        LOGGER.exception("tool call failed: %s", payload.get("method"))
+        response = _error_response(payload.get("id"), -32603, "internal error")
     # Streamable HTTP negotiates a newer revision than the stdio server reports;
     # answering with the stdio version would make a conforming client negotiate down.
     if response is not None and payload.get("method") == "initialize":
@@ -316,6 +330,9 @@ class _Handler(BaseHTTPRequestHandler):
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             self._send_json(400, _error_response(None, -32700, f"invalid JSON: {exc}"))
+            return
+        except RecursionError:  # deeply nested arrays/objects
+            self._send_json(400, _error_response(None, -32700, "invalid JSON: nested too deeply"))
             return
 
         # JSON-RPC batch: a list of messages. Respond with a list of responses.

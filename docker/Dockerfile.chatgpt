@@ -7,7 +7,11 @@ WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 
-RUN python -m pip install --no-cache-dir -e .
+RUN python -m pip install --no-cache-dir -e . \
+    && useradd --create-home --uid 10001 lcc
+
+# Run unprivileged: the server writes nothing to disk.
+USER lcc
 
 # No TYPESAFE_API_KEY: the hosted server runs the offline `mechanical` provider, so
 # user text never leaves this process. Adding a key would switch `compact` onto the

@@ -190,6 +190,7 @@ def _request_tokens(payload: dict[str, Any]) -> tuple[int, str]:
 
 
 _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+_BEARER = re.compile(r"(?i)\bbearer\s+[^\s\"',]+")
 
 
 def _check_endpoint(endpoint: str) -> None:
@@ -265,8 +266,10 @@ class JevClient:
         if self.ledger_path is None:
             return
         with contextlib.suppress(OSError):  # ledger logging must never break compaction
-            self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.ledger_path, "a", encoding="utf-8") as handle:
+            self.ledger_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            # Owner-only (0600) like the request log: entries carry API error bodies.
+            fd = os.open(self.ledger_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(fd, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     # -- transport ------------------------------------------------------------
@@ -328,6 +331,8 @@ class JevClient:
                 body = ""
                 with contextlib.suppress(Exception):  # best-effort error body
                     body = exc.read().decode("utf-8", errors="replace")[:300]
+                # An error body may echo request headers; never persist a bearer token.
+                body = _BEARER.sub("Bearer <redacted>", body).replace(self.api_key, "<redacted>")
                 self._ledger_append(
                     {
                         "ts": _iso_timestamp(),

@@ -105,6 +105,13 @@ def optimize(request: OptimizationRequest) -> OptimizationResult:
             "lossy summarization; reduce the input or raise the limit."
         )
 
+    if dedup.near_duplicate_budget_exhausted:
+        warnings.append(
+            "Near-duplicate detection stopped early: the input has too many similar-length "
+            "paragraphs to compare pairwise within the work budget. Later paragraphs were "
+            "checked for exact duplicates only and otherwise kept."
+        )
+
     if TokenCountMethod.APPROXIMATE in (original_tokens.method, optimized_tokens.method):
         message = "Token counts are approximate; treat token and cost figures as estimates."
         reason = optimized_tokens.note or original_tokens.note
