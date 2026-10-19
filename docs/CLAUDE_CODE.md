@@ -233,6 +233,23 @@ copy and throws on any ref that does not fit, which falls back to the built-in s
 answer that is still over the cap toasts `lcc: built-in summary (tool result is not JSON (N
 chars; over Claude Code's MCP output cap?))`.
 
+Evidence. In the owner's session logs from 2026-10-07 to 2026-10-19 (plugin installed, function
+hooks on, `provider: rules`, `rulesMode: stashed`), every `/compact` of a real session (209k to
+860k tokens, 27 boundaries) wrote Claude Code's summary (50 to 115 s each); the plugin's
+verbatim pass stood only on disposable test sessions of about 58k to 84k tokens. Those logs hold
+no toasts, so the cap is the likely cause, not a measured one (INFERIDO). A disposable session
+then reproduced it (Claude Code 2.1.296, Haiku, subscription login, plugin from `--plugin-dir`,
+the installed `lcc@lcc` off for the run, same options; twelve 30 KB files read, then `/compact`;
+n=1 per row):
+
+| Hook | `compact_transcript` answer | Outcome |
+| :--- | :--- | :--- |
+| before (whole messages) | 157.8 KB, saved to a file by Claude Code; the hook got a 1,365-char text | `lcc: built-in summary (JSON Parse error: Unexpected identifier "Error")`, summary ran |
+| after (`ref_blocks`), twice | 3,002 / 3,003 chars | `lcc: verbatim compaction via rules, no summary (kept 26 messages, ... replaced 8)`; "a hook's 26 messages stand ... core never ran" |
+
+After the fix the agent quoted a placeholder (`[removed: 8354 tokens · lcc recall <id>]`),
+called `recall` and named the first function of the recalled file correctly.
+
 ## What is verified, and what is not
 
 Verified: `claude plugin validate plugins/claude-code` passes and reports the registered
