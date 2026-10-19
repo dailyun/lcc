@@ -110,13 +110,20 @@ def assert_verbatim_and_accounting(text: str, request: RelevanceCompactionReques
     previous_end = 0
     pending_ending = ""  # line ending owed after a marker / trim note (see _glue_guard)
     in_dropped_run = False
+    # Sticky (decisions-cache) mode emits one marker per dropped block so an earlier marker
+    # never changes when a dropped run grows (cache alignment); one-shot passes merge runs.
+    merge_runs = (
+        request.decisions_cache_path is None
+        if request.merge_dropped_runs is None
+        else request.merge_dropped_runs
+    )
     for position, (block, decision) in enumerate(zip(blocks, decisions, strict=True)):
         gap = text[previous_end : block.character_start]
         previous_end = block.character_end
         assert decision.chars == len(block.text)
         assert decision.decision in ("keep", "trim", "drop")
         if decision.decision == "drop":
-            if not in_dropped_run:
+            if not in_dropped_run or not merge_runs:
                 cursor = _consume(out, cursor, pending_ending)
                 assert out.startswith(gap, cursor), f"gap before {block.id} altered"
                 cursor += len(gap)
