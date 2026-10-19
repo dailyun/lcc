@@ -345,6 +345,10 @@ def _pointer_lines(call: Any, body: str, spec: str) -> tuple[int, int] | None | 
 def _lines_match(call: Any, spec: str, body: str, disk: list[str]) -> bool:
     """``body`` is exactly the file's ``disk`` lines (whole file or the read range)."""
     if call.tool in FILE_READ_TOOLS and (rows := _numbered(body)) is not None:
+        # Claude Code's Read numbers the empty line after a final newline ("480\t" for a
+        # 479-line file); that row carries no content, so it does not count against the file.
+        if len(rows) > 1 and rows[-1] == (len(disk) + 1, ""):
+            rows = rows[:-1]
         if spec == "all" and (rows[0][0] != 1 or rows[-1][0] != len(disk)):
             return False
         return all(n <= len(disk) and disk[n - 1] == content for n, content in rows)

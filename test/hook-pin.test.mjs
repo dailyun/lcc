@@ -77,4 +77,8 @@ assert.equal(run("sessionstart", hookInput), `${sessionStartText(facts)}\n`);
 // A missing transcript or bad stdin prints nothing and exits 0 (execFileSync throws otherwise).
 assert.equal(run("precompact", JSON.stringify({ transcript_path: join(dir, "missing.jsonl") })), "");
 assert.equal(run("precompact", "{"), "");
+// The idle stash's compaction never becomes the built-in summary: PreCompact blocks it.
+const idleBlock = JSON.parse(run("precompact", JSON.stringify({ ...JSON.parse(hookInput), custom_instructions: "lcc:idle" })));
+assert.equal(idleBlock.decision, "block");
+assert.equal(run("sessionstart", JSON.stringify({ custom_instructions: "lcc:idle" })), "");
 console.log("hook-pin: ok");

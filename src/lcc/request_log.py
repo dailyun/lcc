@@ -6,8 +6,10 @@ language (EN/PT short-goal heuristic), a salted session hash, the UTC date, the 
 point (``tool``, e.g. "mcp:compact" or "cli:compact"), the caller's field (or "none"),
 the LCC version and the redaction ruleset hash. Tool-call compaction entries also carry
 ``provider`` (the provider that ran, e.g. "specialist-v3") and ``degradation_reason``
-(or "none"): fixed labels from the report, never content. No MCP tool or CLI flag supplies a
-``field`` today, so it stays "none" until a caller passes one to ``log_request``.
+(or "none"): fixed labels from the report, never content. The Claude Code plugin's idle
+stash adds ``trigger`` ("idle"), ``gap_bucket`` (e.g. "1h-2h") and ``removed_tokens``. No MCP
+tool or CLI flag supplies a ``field`` today, so it stays "none" until a caller passes one to
+``log_request``.
 Context/dossier text is never passed in. A failure warns (RuntimeWarning on stderr)
 and never changes LCC output.
 """
@@ -245,6 +247,9 @@ def log_request(
     session_key: str | None = None,
     provider: str | None = None,
     degradation_reason: str | None = None,
+    trigger: str | None = None,
+    gap_bucket: str | None = None,
+    removed_tokens: int | None = None,
 ) -> Path | None:
     """Append one redacted entry when enabled; return the log path or None. Never raises."""
     if not enabled() or not isinstance(goal, str) or not goal.strip():
@@ -270,6 +275,10 @@ def log_request(
         if provider is not None:
             entry["provider"] = provider
             entry["degradation_reason"] = degradation_reason or "none"
+        if trigger is not None:
+            entry["trigger"] = trigger
+            entry["gap_bucket"] = gap_bucket or "unknown"
+            entry["removed_tokens"] = removed_tokens
         _append(directory, entry)
         return directory / LOG_FILE
     except Exception as exc:  # logging must never break compilation, but must be seen

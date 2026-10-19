@@ -69,6 +69,7 @@ def _tool_compact_transcript(args: dict[str, Any]) -> dict[str, Any]:
         TranscriptCompactionRequest,
         compact_transcript,
         messages_to_payload,
+        parse_transcript,
     )
 
     payload = args.get("messages") if "messages" in args else args.get("payload")
@@ -93,9 +94,10 @@ def _tool_compact_transcript(args: dict[str, Any]) -> dict[str, Any]:
     trim_head_chars = int(args.get("trim_head_chars", 300))
     if preserve_recent < 0 or trim_head_chars < 0:
         raise ValueError("preserve_recent and trim_head_chars must be >= 0")
+    request_payload = payload if isinstance(payload, dict) else {"messages": payload}
     result = compact_transcript(
         TranscriptCompactionRequest(
-            payload=payload if isinstance(payload, dict) else {"messages": payload},
+            payload=request_payload,
             question=question,
             provider=provider,
             threshold=threshold,
@@ -113,11 +115,43 @@ def _tool_compact_transcript(args: dict[str, Any]) -> dict[str, Any]:
             allow_command_pointers=args.get("allow_command_pointers") is True,
         )
     )
+    if args.get("ref_unchanged") is True:
+        # Compact answer for callers whose transport caps the result (Claude Code's
+        # $.mcp.call goes through MAX_MCP_OUTPUT_TOKENS): a message that left the pass
+        # unchanged comes back as {"ref": <input index>}, and per-call decisions stay out.
+        source = messages_to_payload(parse_transcript(request_payload))
+        report = {key: value for key, value in result.report.items() if key != "decisions"}
+        compacted = _ref_unchanged(source, messages_to_payload(result.messages))
+        return {"messages": compacted, "report": report}
     return {
         "messages": messages_to_payload(result.messages),
         "decisions": result.decisions,
         "report": result.report,
     }
+
+
+def _ref_unchanged(
+    source: list[dict[str, Any]], compacted: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Replace each compacted message equal to the next unmatched source message by a ref.
+
+    Kept messages are verbatim and in order, so one forward scan finds them; anything else
+    (a trimmed, replaced or new message) is sent whole. Duplicate messages map in order.
+    """
+    positions: dict[str, list[int]] = {}
+    for position, entry in enumerate(source):
+        positions.setdefault(json.dumps(entry, sort_keys=True), []).append(position)
+    out: list[dict[str, Any]] = []
+    cursor = 0
+    for message in compacted:
+        candidates = positions.get(json.dumps(message, sort_keys=True), [])
+        index = next((i for i in candidates if i >= cursor), None)
+        if index is None:
+            out.append(message)
+        else:
+            out.append({"ref": index})
+            cursor = index + 1
+    return out
 
 
 def _tool_inspect(args: dict[str, Any]) -> dict[str, Any]:
@@ -322,6 +356,23 @@ TOOLS: dict[str, dict[str, Any]] = {
                 "max_request_tokens": {"type": "integer", "default": 30000},
                 "max_workers": {"type": "integer", "default": 4},
                 "min_reduction": {"type": "number", "default": 0.25},
+                "ref_unchanged": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Return each message the pass left unchanged as {'ref': <input "
+                        "index>} and leave per-call decisions out, for size-capped callers."
+                    ),
+                },
+                "trigger": {
+                    "type": "string",
+                    "enum": ["idle"],
+                    "description": "Request-log label only: 'idle' for the plugin's idle stash.",
+                },
+                "idle_gap_bucket": {
+                    "type": "string",
+                    "description": "Request-log label only: the idle gap bucket, e.g. '1h-2h'.",
+                },
                 "jev_model": {"type": "string", "default": "jev-latest"},
                 "laya_model": {"type": "string"},
             },
@@ -480,6 +531,14 @@ def handle_message(message: dict[str, Any]) -> dict[str, Any] | None:
             if isinstance(report, dict)
             else {}
         )
+        # The plugin's idle stash labels its passes: fixed labels and a count, never content.
+        if isinstance(report, dict) and arguments.get("trigger") == "idle":
+            removed = (report.get("tokens_before") or 0) - (report.get("tokens_after") or 0)
+            extra.update(
+                trigger="idle",
+                gap_bucket=str(arguments.get("idle_gap_bucket") or "unknown")[:16],
+                removed_tokens=max(0, int(removed)),
+            )
         log_request(
             arguments.get("question"),
             tool=f"mcp:{name}",

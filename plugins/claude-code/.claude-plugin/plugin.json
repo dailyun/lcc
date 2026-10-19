@@ -70,6 +70,30 @@
       "title": "Rules mode",
       "description": "Only with provider 'rules': 'lossless', 'recoverable', 'stashed' or 'lossy'. Empty uses the server default (lossless). 'recoverable' sends the session directory as workspace_root, so every removed file read is checked against the disk. 'stashed' moves removed outputs to a local stash; the agent gets them back with the recall tool (allow mcp__plugin_lcc_lcc__recall).",
       "default": ""
+    },
+    "idleStash": {
+      "type": "boolean",
+      "title": "Idle stash (opt-in)",
+      "description": "Off by default. When on, a session resumed (claude --continue / --resume) after idleTtlSeconds of idle, when the prompt cache has expired, first has its spent tool outputs stashed (provider rules, rulesMode stashed), so the first request's cold re-write is smaller. Removed outputs come back with the recall tool (allow mcp__plugin_lcc_lcc__recall). Any failure leaves the conversation as it is; it never falls back to the built-in summary. Interactive sessions only. See docs/CLAUDE_CODE.md.",
+      "default": false
+    },
+    "idleTtlSeconds": {
+      "type": "number",
+      "title": "Idle threshold (seconds)",
+      "description": "Idle seconds after the last turn before the prompt cache counts as cold. 7200 = the 1-hour cache TTL plus Claude Code's 60-minute cache keepalive window; 3600 only if your debug log shows no [cache-keepalive] touches. Firing on a warm cache costs money.",
+      "default": 7200
+    },
+    "idleMinRemovableTokens": {
+      "type": "number",
+      "title": "Idle stash minimum (tokens)",
+      "description": "Below this many removable tool-output tokens the idle stash does nothing.",
+      "default": 10000
+    },
+    "idleMaxPassesPerSession": {
+      "type": "number",
+      "title": "Idle stash passes per session",
+      "description": "Upper bound on idle stashes in one session.",
+      "default": 8
     }
   }
 }

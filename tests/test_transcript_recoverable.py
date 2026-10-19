@@ -199,6 +199,20 @@ def test_disk_check_passes_when_the_file_still_holds_the_content(disk):
     assert result.report["recoverability_check"] == "disk"
 
 
+def test_disk_check_accepts_claude_codes_trailing_empty_numbered_line(disk):
+    # Claude Code 2.1.296's Read: "1\t..." rows, plus an empty row after the final newline.
+    (disk / "p.py").write_text(FILE)
+    read = "\n".join(f"{n}\t{line}" for n, line in enumerate(LINES, start=1))
+    read += f"\n{len(LINES) + 1}\t"
+    _r, _c, d = run(convo(("Read", {"file_path": str(disk / "p.py")}, read), *filler()),
+                    workspace_root=str(disk))
+    assert d["c1"]["reason"] == "replace_disk_verified"
+    # A non-empty extra row is content the file does not hold.
+    _r, _c, d = run(convo(("Read", {"file_path": str(disk / "p.py")}, read + "x"), *filler()),
+                    workspace_root=str(disk))
+    assert d["c1"]["reason"] == "keep_disk_mismatch"
+
+
 def test_disk_check_keeps_a_read_the_file_no_longer_matches(disk):
     (disk / "p.py").write_text(FILE.replace("line 7 of", "line seven of"))
     _r, compacted, d = run(convo(("Read", {"file_path": str(disk / "p.py")}, NUMBERED),

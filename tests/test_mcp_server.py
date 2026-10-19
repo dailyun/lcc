@@ -471,3 +471,44 @@ def test_compact_transcript_accepts_rules_mode_recoverable_with_a_workspace(
         f"[removed: re-read {tmp_path / 'x.py'} to recover; "
         "content verified on disk at compaction time]"
     )
+
+
+
+def test_compact_transcript_ref_unchanged_is_the_same_answer_smaller():
+    body = "def parse(x):\n    return x\n" * 200
+    messages = [
+        {"role": "user", "text": "fix the parser"},
+        {"role": "assistant", "text": "", "toolUses": [
+            {"tool_use_id": "t1", "tool": "Read", "input": {"file_path": "p.py"}}]},
+        {"role": "user", "text": "", "toolResults": [{"tool_use_id": "t1", "text": body}]},
+        {"role": "assistant", "text": "done"},
+    ]
+
+    def call(**extra):
+        resp = handle_message(
+            {"jsonrpc": "2.0", "id": 11, "method": "tools/call",
+             "params": {"name": "compact_transcript",
+                        "arguments": {"messages": messages, "question": "fix the parser",
+                                      "provider": "rules", "rules_mode": "lossless", **extra}}}
+        )
+        assert resp is not None and "error" not in resp
+        return json.loads(resp["result"]["content"][0]["text"])
+
+    full = call()
+    compact = call(ref_unchanged=True)
+    assert "decisions" not in compact and "decisions" not in compact["report"]
+    assert compact["report"]["tokens_before"] == full["report"]["tokens_before"]
+    expanded = [messages[m["ref"]] if "ref" in m else m for m in compact["messages"]]
+    assert expanded == full["messages"]
+    assert len(json.dumps(compact)) < len(json.dumps(full)) / 2
+
+
+def test_ref_unchanged_sends_changed_and_dropped_messages_whole():
+    from lcc.mcp_server import _ref_unchanged
+
+    a, b, c, d = ({"role": "user", "text": t} for t in "abcd")
+    changed = {"role": "user", "text": "[removed: 9 tokens]"}
+    assert _ref_unchanged([a, b, c, d], [a, changed, d]) == [{"ref": 0}, changed, {"ref": 3}]
+    # Equal messages map in order, never backwards.
+    assert _ref_unchanged([a, a, b], [a, a, b]) == [{"ref": 0}, {"ref": 1}, {"ref": 2}]
+    assert _ref_unchanged([a, b], [b, a]) == [{"ref": 1}, a]

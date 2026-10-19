@@ -40,8 +40,9 @@ The plugin registers one function hook and two classic hooks:
 | Event | What it does |
 | :--- | :--- |
 | `session.compact` | Sends the transcript to `compact_transcript`, replaces the conversation with the compacted one when the pass was judged and removed something, otherwise calls `next(event)` so Claude Code's own summary runs |
-| `PreCompact` (classic) | Prints the session objective, edited/read files and the last tool error, asking the built-in summary to keep them verbatim (`scripts/lcc-pin.mjs precompact`) |
+| `PreCompact` (classic) | Prints the session objective, edited/read files and the last tool error, asking the built-in summary to keep them verbatim (`scripts/lcc-pin.mjs precompact`); blocks the summary for an idle-stash compaction |
 | `SessionStart`, matcher `compact` (classic) | Re-pins the same facts after the summary (`scripts/lcc-pin.mjs sessionstart`) |
+| `turn.complete`, `session.start` | Only with `idleStash: true` (off by default): record the last turn's time / run the idle stash on a session resumed after the cache expired (see "Idle stash" below) |
 
 The two classic hooks need neither the function-hook flag nor a key: without the flag they are
 the whole plugin, and the built-in summary keeps paths, identifiers and the last error verbatim.
@@ -54,8 +55,8 @@ the report the tool returns:
 - `lcc: built-in summary (below the 25% minimum (4.2%))`
 - `lcc: built-in summary (judge unavailable (jev_unavailable_fail_safe))`
 
-There is **no forced compaction**: the plugin never requests a compaction of its own, it only
-decides what a compaction produces. Configure `minReductionRatio`, `preserveRecentMessages`,
+There is **no forced compaction** by default: the plugin requests a compaction of its own only
+with the opt-in idle stash below; otherwise it only decides what a compaction produces. Configure `minReductionRatio`, `preserveRecentMessages`,
 `threshold`, `trimHeadChars`, `maxStateTokens`, `maxRequestTokens` and `question` through the
 plugin's config (`/plugin` → lcc, or `claude plugin install --config key=value`).
 
@@ -72,6 +73,25 @@ directory is the event's `cwd` field when it is an absolute path, else the hook 
 `specialist-v3` names it explicitly. Jev runs only with `provider: jev`, and Laya (deprecated)
 only with `provider: laya`. Any ranker error keeps every call (`degraded: true`) and the hook
 stands down. See [`docs/SPECIALIST.md`](../../../docs/SPECIALIST.md).
+
+## Idle stash (opt-in)
+
+`idleStash: true` adds one more trigger. When a session is **resumed** (`claude --continue` /
+`--resume`) after `idleTtlSeconds` of idle (default 7200: the 1-hour cache TTL plus Claude
+Code's 60-minute cache keepalive), the plugin stashes spent tool outputs (`provider: rules`,
+`rulesMode: stashed`) at `session.start`, before the first request re-writes the cold prefix.
+Removed outputs come back with `recall` (allow `mcp__plugin_lcc_lcc__recall`).
+
+- Any failure answers `{ skip }`; the classic `PreCompact` hook blocks Claude Code's own summary
+  for an idle compaction (`custom_instructions: "lcc:idle"`). Never the built-in summary.
+- It stands down below `idleMinRemovableTokens` (10000), after `idleMaxPassesPerSession` (8)
+  passes, on subagents, and when no turn has happened since the last pass.
+- Toasts: `lcc: idle stash (removed N tokens, ...)` or `lcc: idle stash skipped (reason)`.
+- Interactive and resumed sessions only. On Claude Code 2.1.296 `$.session.compact` is refused
+  in `-p`/SDK sessions and from `prompt.submit`, and a timer's call skips the plugin's own
+  hooks, so a session left open while you are away gets no pass.
+
+Details, evidence and the disposable-session run: [`docs/CLAUDE_CODE.md`](../../../docs/CLAUDE_CODE.md#idle-stash-opt-in).
 
 ## Fallback is the default when anything is off
 
@@ -115,6 +135,7 @@ It also skips `precompute` invocations, which install nothing.
 
 ```bash
 node test/hook-map.test.mjs        # the mapping helpers, no engine needed
+node test/hook-idle.test.mjs       # the idle stash, against a fake engine
 node test/hook-pin.test.mjs        # the PreCompact / SessionStart fallback
 claude plugin validate plugins/claude-code
 ```
