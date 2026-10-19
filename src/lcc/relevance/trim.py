@@ -19,6 +19,15 @@ import xml.etree.ElementTree as ET
 
 TRIM_POLICY_VERSION = "trim-1.2"
 
+#: Lines end at ``\n``, ``\r\n`` or ``\r`` only, and keep their terminator, so a row- or
+#: line-aware trim re-emits the block's own bytes (``str.splitlines`` + ``"\n".join`` turned
+#: CRLF rows into LF rows and split on U+2028).
+_RAW_LINE_RE = re.compile(r"[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+")
+
+
+def _raw_lines(text: str) -> list[str]:
+    return [line for line in _RAW_LINE_RE.findall(text) if line]
+
 #: Semantic-scope qualifiers: cutting before one of these can invert the surviving
 #: claim ("safe for adults" vs "safe for adults, except when..."). Any trim that
 #: would drop or straddle such a cue is refused (TRIM→KEEP).
@@ -199,34 +208,37 @@ def trim_block_safe(
             return text, False, ctype
         return head, True, ctype
     if ctype == "markdown_table":
-        # Row-aware: keep header + delimiter + as many full rows as fit.
-        lines = text.splitlines()
+        # Row-aware: keep header + delimiter + as many full rows as fit, bytes unchanged.
+        lines = _raw_lines(text)
         try:
             delim_idx = next(
-                i for i, line in enumerate(lines) if _TABLE_DELIM_RE.match(line)
+                i
+                for i, line in enumerate(lines)
+                if _TABLE_DELIM_RE.match(line.rstrip("\r\n"))
             )
         except StopIteration:
             return text, False, ctype
         keep = lines[: delim_idx + 1]
         budget = head_chars
-        used = sum(len(line) + 1 for line in keep)
+        used = sum(len(line) for line in keep)
         for line in lines[delim_idx + 1 :]:
-            if used + len(line) + 1 > budget:
+            if used + len(line) > budget:
                 break
             keep.append(line)
-            used += len(line) + 1
+            used += len(line)
         if len(keep) <= delim_idx + 1:
             return text, False, ctype  # not even one data row fits
-        return "\n".join(keep), True, ctype
+        return "".join(keep).rstrip("\r\n"), True, ctype
     if ctype == "logs":
         # Head + tail: oldest context plus the most recent state (usually at the end).
         if head_chars < 120:
             return text, False, ctype
-        lines = text.splitlines()
+        # Both halves are byte-exact slices of the block: a prefix and a suffix.
+        lines = _raw_lines(text)
         head_budget = head_chars // 3
         tail_budget = head_chars - head_budget
-        head_text = "\n".join(lines[: max(1, len(lines) // 4)])[:head_budget]
-        tail_text = "\n".join(lines[-(len(lines) // 2 or 1) :])[-tail_budget:]
+        head_text = "".join(lines[: max(1, len(lines) // 4)])[:head_budget]
+        tail_text = "".join(lines[-(len(lines) // 2 or 1) :])[-tail_budget:]
         # Re-cut both halves at line boundaries for clean edges.
         head_cut = head_text.rfind("\n")
         if head_cut > 20:
@@ -234,8 +246,11 @@ def trim_block_safe(
         tail_start = tail_text.find("\n")
         if 0 <= tail_start < len(tail_text) // 2:
             tail_text = tail_text[tail_start + 1 :]
-        combined = (head_text.rstrip() + "\n" + tail_text.lstrip()).strip()
-        if not combined or len(combined) >= len(text):
+        head_text, tail_text = head_text.rstrip(), tail_text.lstrip()
+        if not head_text or not tail_text.strip():
+            return text, False, ctype
+        combined = head_text + "\n" + tail_text
+        if len(combined) >= len(text):
             return text, False, ctype
         return combined, True, ctype
     if ctype in ("code", "config", "markdown", "yaml"):

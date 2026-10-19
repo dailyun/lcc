@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-RELATIONSHIP_VERSION = "relationships-1.0"
+RELATIONSHIP_VERSION = "relationships-1.1"
 
 
 class EdgeType(StrEnum):
@@ -135,8 +136,11 @@ _STOPWORDS = frozenset(
 
 
 def _terms(text: str) -> set[str]:
+    # Accent-insensitive, matching the compactor's question terms (``fold_accents``).
+    decomposed = unicodedata.normalize("NFKD", text.lower())
+    folded = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
     out: set[str] = set()
-    for m in _WORD_RE.finditer(text.lower()):
+    for m in _WORD_RE.finditer(folded):
         t = m.group(0).strip("'")
         if len(t) >= 4 and t not in _STOPWORDS:
             out.add(t)
