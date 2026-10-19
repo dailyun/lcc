@@ -185,6 +185,28 @@ All notable changes to this project are documented here. The format is based on
   `other`. Corrupt or old files are skipped and counted, never echoed. `--since YYYY-MM-DD`
   filters the request log. Sends nothing; CLI only, not exposed over MCP.
   See `docs/SHARE_STATS.md`.
+### Documentation
+
+- **README first screen.** A one-sentence summary, a before/after for Claude Code's `/compact`
+  with the 55,411 → 18,761-token real session and its n=2 caveat (measured with the opt-in Jev
+  judge), the plugin install with its requirements (Claude Code 2.1.274+,
+  `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`), and the pip/MCP quick start. The recall-AUC table
+  moved lower with a plain explanation of the metric, next to a note that real-session
+  aggregates are owner-attested until a public dataset exists. New "Share your numbers"
+  section.
+- **`results` issue form** (`.github/ISSUE_TEMPLATE/results.yml`) for anonymous counts:
+  version, provider and mode, agent, tokens before and after, `recall` calls, whether the
+  agent lost something. Session text is never asked for. `config.yml` links Discussions and
+  the security policy; `.github/FUNDING.yml` added.
+- **MCP Registry:** `server.json` for `io.github.lucasmartins-ai/lcc` (PyPI package, stdio,
+  `lcc mcp`) and the `mcp-name` ownership marker in the README. Not published yet.
+- Draft GitHub Release notes in `docs/release-notes/1.2.0.md`, and five starter issues in
+  `docs/contributing/good-first-issues.md`.
+
+### Changed
+
+- `pyproject.toml`: `Source` URL and the keywords `claude-code`, `mcp`, `agents`,
+  `context-compaction`.
 
 ## [1.2.0] - 2026-10-19
 

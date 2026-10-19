@@ -1,0 +1,101 @@
+name: Share your numbers
+description: Report anonymous counts from running lcc on your own sessions or documents.
+title: "[results]: "
+labels: ["results"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for measuring. **Counts only: never paste session text, file contents, tool
+        output, prompts, paths or ids.** A number with its version and settings is all this
+        needs. Published numbers in this repository are mostly from one maintainer's sessions,
+        so results from other people and other agents are the most useful thing you can send.
+  - type: input
+    id: version
+    attributes:
+      label: lcc version
+      description: Output of `lcc --version`.
+      placeholder: "lcc 1.2.0"
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Provider and mode
+      description: "`provider_used` from the report, plus `rules_mode` if you used `rules`."
+      placeholder: "specialist-v3 / rules stashed / mechanical / jev"
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent or source
+      options:
+        - Claude Code (plugin)
+        - Claude Code (MCP or CLI, no plugin)
+        - Codex
+        - Other agent
+        - Plain documents, not an agent transcript
+    validations:
+      required: true
+  - type: input
+    id: tokens-before
+    attributes:
+      label: Tokens before
+      placeholder: "55411"
+    validations:
+      required: true
+  - type: input
+    id: tokens-after
+    attributes:
+      label: Tokens after
+      placeholder: "18761"
+    validations:
+      required: true
+  - type: input
+    id: removed
+    attributes:
+      label: Removed tokens
+      description: From the report, if it differs from before minus after.
+    validations:
+      required: false
+  - type: input
+    id: recall-calls
+    attributes:
+      label: "`recall` calls used afterwards"
+      description: How many times the agent called `recall` (stashed mode) after the pass. 0 if none, n/a if not stashed.
+    validations:
+      required: false
+  - type: dropdown
+    id: lost
+    attributes:
+      label: Did the agent lose something it needed?
+      options:
+        - "No"
+        - "Yes"
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: lost-details
+    attributes:
+      label: Details
+      description: >-
+        If yes or not sure: what kind of thing was lost (for example "a config value from an
+        early file read") and what the agent did next. Describe it; do not paste it.
+    validations:
+      required: false
+  - type: textarea
+    id: setup
+    attributes:
+      label: Anything else about the setup
+      description: Options you changed from the defaults, session size in messages or tool calls, how you counted tokens.
+    validations:
+      required: false
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: This issue contains counts only, no session text, file contents, paths or ids.
+          required: true
