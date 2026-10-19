@@ -41,20 +41,6 @@ All notable changes to this project are documented here. The format is based on
   CI workflow sets `permissions: contents: read`, both Docker images run as an unprivileged
   user, and `.dockerignore` excludes `.env` files and keys.
 
-### Changed
-
-- **`auto` stays local for plain text.** `compact` / `lcc compact` / intake relevance with
-  `provider: auto` used to send context blocks to the TypeSafe API whenever a key resolved
-  (environment, `~/.config/lcc/typesafe.key`, a sibling `.env`, or the macOS Keychain), with
-  no explicit opt-in. It now scores with the local `mechanical` provider (report unchanged
-  from the no-key case: `degraded: true`, `jev_unavailable_mechanical_fallback`, plus an
-  `auto_local_only` warning). Escape hatch: name `--provider jev`, or set `LCC_AUTO_REMOTE=1`
-  to restore the old `auto` behaviour. Transcripts under `auto` were already local
-  (`specialist-v3`).
-
-### Fixed
-
-- `mypy` passes with and without `tiktoken` installed (no unused `type: ignore`).
 ### Added
 
 - **Edge-case suite for the deterministic core.** These are property tests over a seeded,
@@ -68,57 +54,6 @@ All notable changes to this project are documented here. The format is based on
   CRLF table. They are reported in their own section, so the nine original cases stay
   comparable. `--check` now also requires rules-lossless to keep their needles and v3-blocks
   to keep `pt_en_mixed`. `benchmarks/results/judge_bench.*` were not regenerated here.
-
-### Changed
-
-- **Drop markers and trim notes keep the replaced block's line ending.** Before, a marker
-  merged with the next paragraph. When no blank line followed (a code fence right after a
-  paragraph, or a split oversized block), it was glued onto that block's first line and broke
-  the fence. Output bytes after the first mutation change: one line ending per marker or trim.
-- **Mechanical matching is accent-insensitive** (`fold_accents`: NFKD, combining marks
-  dropped). Accented words were split by the ASCII word pattern (`não` became `n` + `o`).
-  Language detection now reads Unicode words and recognises accented Portuguese function
-  words, so Portuguese evidence under an English objective is protected
-  (`evidence_in_pt_not_en`). v3-blocks now keeps the judge-bench `pt_en_mixed` needle (8/9 to
-  9/9 must-keep), with unchanged reduction. specialist-v3 features keep the training-time
-  tokenization (`fold=False`).
-- **specialist-v3 hard floors.** The rule-floor blocks (best goal match, newest error blocks)
-  are never drop candidates (`specialist_floor`). With transcript segments, the latest user
-  message is protected (`latest_user_message`). New `SpecialistJudge.score_and_floor`.
-- **Tool-call mode refuses content it cannot rebuild** and names the field. This covers text
-  under `content`, any non-empty list/object field (images, attachments, content blocks), tool
-  results with `content` blocks, a non-object call `input`, and unpaired surrogates. Before,
-  these parsed as empty and were silently lost from the output.
-- `PROTECTION_VERSION` is `protection-1.2` and `RELATIONSHIP_VERSION` is `relationships-1.1`.
-  The protection and relationship policies changed for non-ASCII text, so sticky decisions
-  start a new cache epoch.
-
-### Fixed
-
-- Boilerplate removal deleted `----`, `Page 3 of 10`, `On … wrote:` and similar lines inside
-  fenced code blocks.
-- Paragraph dedup split fenced code on blank lines, deduplicated inside it, and stripped the
-  leading indentation of every paragraph. NFC and NFD spellings of one paragraph are now
-  exact duplicates, and the first keeps its own bytes.
-- Cleaning replaced input text that happened to contain its internal NUL placeholder with a
-  protected block.
-- A leading BOM hid a first-line code fence from cleaning (the code was whitespace-collapsed)
-  and from block segmentation (fence pairing flipped). Cleaning strips the BOM (`strip_bom`);
-  compaction keeps it.
-- Block line numbers ignored a lone CR, and U+2028 or a form feed counted as a line break. An
-  oversized block could be cut between CR and LF. `BLOCK_ID_RE` rejected ids past block 9999,
-  and restoration ties sorted `blk_10000` before `blk_9999`.
-- Trimmed CRLF markdown tables and logs came back with LF line endings, so the head was no
-  longer the block's own bytes.
-- `semantic_cache_misses` subtracted cache hits twice and went negative on warm runs.
-- Unpaired surrogates crashed `optimize` and `compact_context` deep in hashing. They now raise
-  a `ValueError` that names the offset.
-- Tool-call mode with lossy rules, specialist-v3 or Jev: a drop decided for one call also
-  removed every call sharing its id, even in a pinned message. A call just outside the recent
-  window could be dropped together with its result inside the window. Both are now kept
-  (`duplicate_tool_use_id`, `pinned_recent_result`), as the lossless and recoverable modes
-  already did.
-### Added
 
 - **Cache contract as code (`lcc.relevance.cache_contract`).** The prompt-cache invariants of a
   compaction pass are now defined and tested (`docs/CACHE_ALIGNMENT.md`, "Invariants and
@@ -146,7 +81,48 @@ All notable changes to this project are documented here. The format is based on
 - `test/hook-cache.test.mjs`: idle stash TTL boundaries, `idleMinRemovableTokens` boundary,
   pass cap, every fail-safe path, idempotent placeholders.
 
+- **`lcc share-stats`: anonymous "share your numbers" summary for beta testers.** Reads local
+  `lcc compact -r` reports and the opt-in request log (`LCC_REQUEST_LOG=1`) and prints Markdown
+  (default) or `--json` (`lcc-share-stats-1.0`) to paste into a "Share your results" issue:
+  pass and provider/mode counts, degraded/fallback passes, passes under the 25% gate, token
+  totals rounded to the nearest 100, p10/median/p90 reduction ratio, idle-stash passes. No
+  text, paths, ids, hashes or times finer than a day; labels outside fixed allowlists become
+  `other`. Corrupt or old files are skipped and counted, never echoed. `--since YYYY-MM-DD`
+  filters the request log. Sends nothing; CLI only, not exposed over MCP.
+  See `docs/SHARE_STATS.md`.
+
 ### Changed
+
+- **`auto` stays local for plain text.** `compact` / `lcc compact` / intake relevance with
+  `provider: auto` used to send context blocks to the TypeSafe API whenever a key resolved
+  (environment, `~/.config/lcc/typesafe.key`, a sibling `.env`, or the macOS Keychain), with
+  no explicit opt-in. It now scores with the local `mechanical` provider (report unchanged
+  from the no-key case: `degraded: true`, `jev_unavailable_mechanical_fallback`, plus an
+  `auto_local_only` warning). Escape hatch: name `--provider jev`, or set `LCC_AUTO_REMOTE=1`
+  to restore the old `auto` behaviour. Transcripts under `auto` were already local
+  (`specialist-v3`).
+
+- **Drop markers and trim notes keep the replaced block's line ending.** Before, a marker
+  merged with the next paragraph. When no blank line followed (a code fence right after a
+  paragraph, or a split oversized block), it was glued onto that block's first line and broke
+  the fence. Output bytes after the first mutation change: one line ending per marker or trim.
+- **Mechanical matching is accent-insensitive** (`fold_accents`: NFKD, combining marks
+  dropped). Accented words were split by the ASCII word pattern (`não` became `n` + `o`).
+  Language detection now reads Unicode words and recognises accented Portuguese function
+  words, so Portuguese evidence under an English objective is protected
+  (`evidence_in_pt_not_en`). v3-blocks now keeps the judge-bench `pt_en_mixed` needle (8/9 to
+  9/9 must-keep), with unchanged reduction. specialist-v3 features keep the training-time
+  tokenization (`fold=False`).
+- **specialist-v3 hard floors.** The rule-floor blocks (best goal match, newest error blocks)
+  are never drop candidates (`specialist_floor`). With transcript segments, the latest user
+  message is protected (`latest_user_message`). New `SpecialistJudge.score_and_floor`.
+- **Tool-call mode refuses content it cannot rebuild** and names the field. This covers text
+  under `content`, any non-empty list/object field (images, attachments, content blocks), tool
+  results with `content` blocks, a non-object call `input`, and unpaired surrogates. Before,
+  these parsed as empty and were silently lost from the output.
+- `PROTECTION_VERSION` is `protection-1.2` and `RELATIONSHIP_VERSION` is `relationships-1.1`.
+  The protection and relationship policies changed for non-ASCII text, so sticky decisions
+  start a new cache epoch.
 
 - **With `--decisions-cache`, every dropped block gets its own marker** (format unchanged:
   `[lcc-compact: dropped 1 block (N chars)]`). A merged run marker counted the whole run, so a
@@ -160,7 +136,36 @@ All notable changes to this project are documented here. The format is based on
   the report says so (`cache_effect.sticky_flips`, `cache_epoch_opened` warning); a ratcheted
   restoration still counts in `blocks_restored`.
 
+- `pyproject.toml`: `Source` URL and the keywords `claude-code`, `mcp`, `agents`,
+  `context-compaction`.
+
 ### Fixed
+
+- `mypy` passes with and without `tiktoken` installed (no unused `type: ignore`).
+
+- Boilerplate removal deleted `----`, `Page 3 of 10`, `On … wrote:` and similar lines inside
+  fenced code blocks.
+- Paragraph dedup split fenced code on blank lines, deduplicated inside it, and stripped the
+  leading indentation of every paragraph. NFC and NFD spellings of one paragraph are now
+  exact duplicates, and the first keeps its own bytes.
+- Cleaning replaced input text that happened to contain its internal NUL placeholder with a
+  protected block.
+- A leading BOM hid a first-line code fence from cleaning (the code was whitespace-collapsed)
+  and from block segmentation (fence pairing flipped). Cleaning strips the BOM (`strip_bom`);
+  compaction keeps it.
+- Block line numbers ignored a lone CR, and U+2028 or a form feed counted as a line break. An
+  oversized block could be cut between CR and LF. `BLOCK_ID_RE` rejected ids past block 9999,
+  and restoration ties sorted `blk_10000` before `blk_9999`.
+- Trimmed CRLF markdown tables and logs came back with LF line endings, so the head was no
+  longer the block's own bytes.
+- `semantic_cache_misses` subtracted cache hits twice and went negative on warm runs.
+- Unpaired surrogates crashed `optimize` and `compact_context` deep in hashing. They now raise
+  a `ValueError` that names the offset.
+- Tool-call mode with lossy rules, specialist-v3 or Jev: a drop decided for one call also
+  removed every call sharing its id, even in a pinned message. A call just outside the recent
+  window could be dropped together with its result inside the window. Both are now kept
+  (`duplicate_tool_use_id`, `pinned_recent_result`), as the lossless and recoverable modes
+  already did.
 
 - **`rules_mode: stashed` re-stashed its own placeholders.** A second pass over stashed history
   (a second idle stash) replaced `[removed: 693 tokens · lcc recall <id>]` with a pointer to the
@@ -174,17 +179,7 @@ All notable changes to this project are documented here. The format is based on
   to a string on `+= 1` and never reached `idleMaxPassesPerSession`; a non-object store record
   was spread into the new one. Both are sanitised. A negative idle gap (clock skew) now reports
   `clock skew` instead of `cache warm` (still never fires).
-### Added
 
-- **`lcc share-stats`: anonymous "share your numbers" summary for beta testers.** Reads local
-  `lcc compact -r` reports and the opt-in request log (`LCC_REQUEST_LOG=1`) and prints Markdown
-  (default) or `--json` (`lcc-share-stats-1.0`) to paste into a "Share your results" issue:
-  pass and provider/mode counts, degraded/fallback passes, passes under the 25% gate, token
-  totals rounded to the nearest 100, p10/median/p90 reduction ratio, idle-stash passes. No
-  text, paths, ids, hashes or times finer than a day; labels outside fixed allowlists become
-  `other`. Corrupt or old files are skipped and counted, never echoed. `--since YYYY-MM-DD`
-  filters the request log. Sends nothing; CLI only, not exposed over MCP.
-  See `docs/SHARE_STATS.md`.
 ### Documentation
 
 - **README first screen.** A one-sentence summary, a before/after for Claude Code's `/compact`
@@ -202,11 +197,6 @@ All notable changes to this project are documented here. The format is based on
   `lcc mcp`) and the `mcp-name` ownership marker in the README. Not published yet.
 - Draft GitHub Release notes in `docs/release-notes/1.2.0.md`, and five starter issues in
   `docs/contributing/good-first-issues.md`.
-
-### Changed
-
-- `pyproject.toml`: `Source` URL and the keywords `claude-code`, `mcp`, `agents`,
-  `context-compaction`.
 
 ## [1.2.0] - 2026-10-19
 
@@ -426,7 +416,6 @@ ChatGPT plugin.
   reproducible offline usability measurements and explicit benchmark limits.
 - Sprint-7 historical reports now carry an audit notice for final-attempt
   costs, unpaired bootstrap sampling and incomplete reproducibility checks.
-
 
 ### Added
 
