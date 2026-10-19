@@ -68,6 +68,11 @@ change the bytes. Pinning one judgment per content is what keeps cold and warm r
 The objective is part of the decision key: changing the objective is a natural cache epoch
 and rescoring starts fresh.
 
+Two exceptions to "forever", both reported (see [Invariants and tests](#invariants-and-tests)):
+a sufficiency restoration may keep an earlier sticky drop once a new block links to it (the
+flip is persisted, so it happens once), and a block whose semantic neighbourhood changes is
+re-keyed and decided again.
+
 ### 3. Epoch discipline — recompute only when you must
 
 Treat these as epoch boundaries (rebuild caches once, deliberately):
@@ -129,6 +134,7 @@ The report is designed for automated cache accounting:
 | `reused_decisions` / `calls` | a warm-cache run should show `calls: 0` and full reuse |
 | `invalidated_tokens` | tokens to the right of the mutation, i.e. what a warm cache would recompute |
 | `break_even_reuses` | reuses of the pruned context needed before the drop pays for the invalidation |
+| `cache_effect` | the cost-model verdict: stable prefix, invalidated/rewritten tokens, relative cost delta, `recommended`, `epoch_opened`, `sticky_flips` (below) |
 | `degraded` / `degradation_reason` / `semantic_guarantee` | whether the semantic judge actually ran, and what the pass can promise |
 | `token_count_method` | `approximate` means every token figure is an estimate, not a measurement |
 
@@ -156,3 +162,81 @@ growing.
 2. While the cache is warm: `lcc compact tail.md -q "<objective>" --prefix-marker "<!-- lcc:cache-break -->" --decisions-cache <path>`.
 3. On objective/session change: full `lcc compact` once, no protection, fresh decisions file.
 4. Never compact the stable prefix mid-epoch; the 90x math above is the reason.
+
+## Invariants and tests
+
+The contract above is code (`src/lcc/relevance/cache_contract.py`) and is tested. A pass
+promises four things.
+
+| | invariant | how it holds | tested by |
+|---|---|---|---|
+| **I1** | **Prefix stability.** Within one cache epoch (same objective and policy, `--decisions-cache` on), a pass over an append-only input emits the previous pass's output as a byte-exact prefix. | Sticky decisions; restorations are persisted (ratchet), so a decision flips at most once per epoch, and such a flip is reported. | `tests/test_cache_contract.py` (seeded property test), `benchmarks/cache/run_prefix_stability.py --check` |
+| **I2** | **Deterministic placeholders.** The same removed content gives the same marker / `[removed: N tokens · lcc recall <id>]` text and id; a pass never replaces its own placeholder, so a second pass over its output is a no-op. | Content-addressed stash ids; existing pointers are kept (`already_stashed`). | `test_second_stash_pass_keeps_existing_placeholders`, `test/hook-cache.test.mjs` |
+| **I3** | **No non-deterministic fields** in the emitted context: no timestamps, random ids, dict order, locale, timezone or float formatting drift. | Scores only inline with `--marker-scores`, as fixed-decimal buckets; reports round every cost to fixed decimals. | `test_emitted_bytes_ignore_hash_seed_locale_and_timezone` (three `PYTHONHASHSEED` / `LC_ALL` / `TZ` combinations, one sha256) |
+| **I4** | **Appending never rewrites earlier output** unless an epoch is opened and the report says so. | With a decisions cache each dropped block gets its own marker, so a dropped run that grows at the tail does not rewrite the marker already emitted. | `test_sticky_tail_run_growing_keeps_earlier_marker` |
+
+### Reading `cache_effect`
+
+```json
+"cache_effect": {
+  "contract_version": "cache-contract-1.0",
+  "cache_state": "unknown", "assumed_state": "warm", "baseline": "previous_output",
+  "stable_prefix_tokens": 9120, "invalidated_prefix_tokens": 0, "rewritten_tokens": 310,
+  "removed_tokens": 1450, "expected_reuses": 1,
+  "factors": {"read": 0.1, "write": 1.25, "input": 1.0},
+  "estimated_cost_no_pass": 6470.0, "estimated_cost_pass": 1299.5,
+  "estimated_relative_cost_delta": -0.7991,
+  "recommended": true, "reason": "saves_cost_warm_cache",
+  "epoch_opened": false, "sticky_flips": []
+}
+```
+
+An incremental sticky pass: the previous output (9 120 tokens) is cached; the new pass keeps it
+whole and appends 310 tokens. Sending the raw input instead would diverge from the cache at the
+first block an earlier pass dropped (6 200 tokens in) and write the rest again, so here the pass
+is about 80 % cheaper even on a warm cache.
+
+- **baseline** is what the provider has cached: the input (default) or the previous pass's
+  output (`--previous-output`, `previous_compacted_text`). Pass the previous output on
+  incremental sticky runs: the cache holds that, not the raw input.
+- **cost model.** Costs are relative to the input-token price. Warm: tokens in the stable prefix
+  are cache reads (`read`), the rest is written (`write`). Cold: everything is written. Each
+  further reuse reads the whole request. The pass is `recommended` only when it removes at
+  least one token (the idle stash: `idleMinRemovableTokens`) and its cost over
+  `expected_reuses` requests is lower than not compacting. `unknown` is priced as warm, the
+  conservative assumption. `invalidated_tokens` / `break_even_reuses` keep their old meaning
+  (tokens right of the first mutation in the *input*); `rewritten_tokens` counts what is
+  actually written again after the pass.
+- **cache state from an idle gap** (`cache_state_from_idle`, mirrored by the Claude Code hook's
+  `idleDecision`): a gap exactly at the TTL is cold; one millisecond less is warm; a negative
+  gap is clock skew and counts as warm (a wrong "cold" is the expensive mistake); a missing or
+  non-numeric timestamp is unknown and the hook does nothing.
+- **epoch_opened** is true when the pass does not keep the whole baseline as a prefix.
+  `sticky_flips` names reused decisions a restoration flipped to keep in this pass (with a
+  `cache_epoch_opened` warning). A flip is persisted and does not repeat.
+
+The idle stash is a deliberate epoch: it runs only once the cache is cold, sends
+`cache_state: "cold"`, and rewrites early history by design. What it promises is I2: a second
+stash never touches the placeholders of the first, and stashing already-stashed history removes
+nothing, so the hook stands down instead of rewriting a prefix for no saving. Its edges (TTL
+boundary, `idleMinRemovableTokens` boundary, `idleMaxPassesPerSession`, every failure path
+answering skip and never throwing into Claude Code) are in `test/hook-cache.test.mjs`.
+
+### Measured: `benchmarks/cache/run_prefix_stability.py`
+
+Seeded synthetic sessions (12 seeds, 12 turns, mechanical provider, no network, ~10 s) grow one
+to three blocks per turn with a pass after every turn; the stable share is the fraction of the
+previous output that survives byte-identical at the head of the next.
+
+| arm | passes | append-only | mean stable share | unexplained breaks |
+|---|---|---|---|---|
+| block compaction, sticky (this contract) | 132 | 96.2 % | 0.975 | 0 (5 reported epochs, 9 sticky flips) |
+| same, merged run markers (before) | 132 | 82.6 % | 0.968 | 18 |
+
+Stashed transcript passes (12 seeds × 5 rounds): 0 idempotence violations, 0 placeholder
+rewrites, every pass `recommended` on a cold cache. The mean stable share there is 0.08 by
+design: a stash rewrites early history, which is why it waits for a cold cache.
+
+`--check` fails on any unreported or unexplained break, an append-only rate under 0.9, a
+non-idempotent stash or a rewritten placeholder; CI runs it next to the judge benchmark smoke.
+

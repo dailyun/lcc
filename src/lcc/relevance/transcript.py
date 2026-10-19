@@ -34,6 +34,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
+from lcc.relevance.cache_contract import CACHE_STATES, common_prefix_chars, estimate_cache_effect
 from lcc.relevance.jev import JEV_CONTEXT_LIMIT_TOKENS, JevClient, jev_tokens, parse_noul_answer
 from lcc.relevance.transcript_lossless import (
     duplicate_ids,
@@ -180,6 +181,11 @@ class TranscriptCompactionRequest:
     disk_check: bool = True
     #: ``recoverable`` only: also allow re-run command pointers (off since the v0.7 review).
     allow_command_pointers: bool = False
+    #: Provider cache state for the report's ``cache_effect``: warm | cold | unknown
+    #: (unknown is priced as warm). The idle stash sends ``cold``: it only runs past the TTL.
+    cache_state: str = "unknown"
+    #: Requests expected to reuse the compacted history, the next one included.
+    expected_reuses: int = 1
 
 
 @dataclass
@@ -1018,6 +1024,8 @@ def compact_transcript(request: TranscriptCompactionRequest) -> TranscriptCompac
         raise TranscriptError("preserve_recent must be >= 0")
     if request.rules_mode not in RULES_MODES:
         raise TranscriptError(f"rules_mode must be one of {RULES_MODES}")
+    if request.cache_state not in CACHE_STATES:
+        raise TranscriptError(f"cache_state must be one of {CACHE_STATES}")
 
     messages = parse_transcript(request.payload)
     for message in messages:
@@ -1299,6 +1307,25 @@ def compact_transcript(request: TranscriptCompactionRequest) -> TranscriptCompac
     else:
         semantic_guarantee = "none"
 
+    # Cache contract: the provider holds the transcript as it was; everything after the
+    # first changed character is written again (docs/CACHE_ALIGNMENT.md).
+    shared = common_prefix_chars(before_text, after_text)
+    stable_tokens = (
+        after_count.value
+        if shared == len(after_text)
+        else count_tokens(after_text[:shared], request.model).value
+    )
+    cache_effect = estimate_cache_effect(
+        baseline_tokens=before_count.value,
+        no_pass_tokens=before_count.value,
+        no_pass_stable_tokens=before_count.value,
+        pass_tokens=after_count.value,
+        pass_stable_tokens=stable_tokens,
+        cache_state=request.cache_state,
+        expected_reuses=request.expected_reuses,
+        epoch_opened=shared < len(before_text),
+    ).to_dict()
+
     tool_chars_before = sum(call.chars for call in candidates)
     tool_chars_after = sum(decision["chars_after"] for decision in decisions)
     tool_reduction = (
@@ -1359,6 +1386,7 @@ def compact_transcript(request: TranscriptCompactionRequest) -> TranscriptCompac
         "tool_calls_replaced": sum(
             1 for decision in decisions if decision["decision"] == "replace"
         ),
+        "cache_effect": cache_effect,
         "tool_calls_stashed": sum(
             1 for decision in decisions if decision["decision"] == "replace" and "stash" in decision
         ),

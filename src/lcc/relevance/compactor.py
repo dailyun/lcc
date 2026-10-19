@@ -47,6 +47,15 @@ from lcc.relevance.blocks import (
     gaps_between,
     split_blocks,
 )
+from lcc.relevance.cache_contract import (
+    CACHE_STATES,
+    DEFAULT_INPUT_FACTOR,
+    DEFAULT_READ_FACTOR,
+    DEFAULT_WRITE_FACTOR,
+    CacheFactors,
+    common_prefix_chars,
+    estimate_cache_effect,
+)
 from lcc.relevance.decisions import (
     BLOCK_PARSER_VERSION,
     POLICY_VERSION,
@@ -80,10 +89,13 @@ POLICY_VERSION_ALIAS = POLICY_VERSION
 #: Prompt-cache cost factors from ``docs/CACHE_ALIGNMENT.md``: a cache read costs ~0.10x the
 #: base token price and a cache write ~1.25x. Used to report the break-even reuse count of a
 #: pass that mutates a warm prefix. Override per provider before trusting the figure.
-_CACHE_READ_FACTOR = 0.10
-_CACHE_WRITE_FACTOR = 1.25
+_CACHE_READ_FACTOR = DEFAULT_READ_FACTOR
+_CACHE_WRITE_FACTOR = DEFAULT_WRITE_FACTOR
 
 _DEFAULT_THRESHOLD = 0.4
+_RESTORATION_REASONS = frozenset(
+    {"semantic_sufficiency_restoration", "semantic_verifier_fail_restoration"}
+)
 _DEFAULT_BATCH_SIZE = 8
 _DEFAULT_MAX_STATE_CHARS = 12000
 _DEFAULT_TRIM_HEAD_CHARS = 300
@@ -204,6 +216,23 @@ class RelevanceCompactionRequest:
     #: a provider-independent ``context-ir/0.1`` dict built from the finished
     #: pass. Default off so existing outputs stay byte-identical.
     emit_ir: bool = False
+    #: Cache contract (docs/CACHE_ALIGNMENT.md, "Invariants and tests"). ``None`` = auto:
+    #: runs of dropped blocks collapse into one marker, except with a decisions cache, where
+    #: every dropped block gets its own marker so a run that grows at the tail on the next
+    #: pass never rewrites the marker already emitted (invariant I4).
+    merge_dropped_runs: bool | None = None
+    #: Provider cache state for ``cache_effect``: warm | cold | unknown (priced as warm).
+    cache_state: str = "unknown"
+    #: Requests expected to reuse this context (the next one included) for ``cache_effect``.
+    expected_reuses: int = 1
+    #: Relative price multipliers (x base input price) for ``cache_effect`` and
+    #: ``break_even_reuses``. Defaults are the docs' 0.10x read / 1.25x write.
+    cache_read_factor: float = DEFAULT_READ_FACTOR
+    cache_write_factor: float = DEFAULT_WRITE_FACTOR
+    cache_input_factor: float = DEFAULT_INPUT_FACTOR
+    #: The previous pass's output, when the provider cache holds that rather than the raw
+    #: input (incremental sticky runs). ``cache_effect`` then measures stability against it.
+    previous_compacted_text: str | None = None
     #: Task id recorded in the IR envelope; derived deterministically from the
     #: objective when omitted so identical inputs emit identical bytes.
     task_id: str | None = None
@@ -296,6 +325,11 @@ class RelevanceCompactionReport:
     #: the read/write factors in ``docs/CACHE_ALIGNMENT.md``. ``None`` when nothing was
     #: dropped or nothing was invalidated.
     break_even_reuses: float | None = None
+    #: Cache contract verdict (``lcc.relevance.cache_contract``, additive field): stable
+    #: prefix vs what the provider caches, invalidated/rewritten tokens, relative cost delta
+    #: of the pass vs no pass under the configured multipliers, ``recommended``, and whether
+    #: the pass opened a cache epoch (``epoch_opened``, ``sticky_flips``).
+    cache_effect: dict[str, Any] | None = None
     #: Tokenizer contract: what actually counted the tokens (never imply equivalence
     #: across tokenizers). ``token_count_method`` stays for back-compat; the identity
     #: fields say which tokenizer and whether the figures are estimates.
@@ -825,6 +859,11 @@ def _assemble_compacted(
         index = 0
         total = len(ordered)
         by_id = {block.id: block for block in blocks}
+        merge_runs = (
+            request.decisions_cache_path is None
+            if request.merge_dropped_runs is None
+            else request.merge_dropped_runs
+        )
         while index < total:
             ordered_decision = ordered[index]
             if ordered_decision.id in dropped_ids:
@@ -832,6 +871,8 @@ def _assemble_compacted(
                 while index < total and ordered[index].id in dropped_ids:
                     run.append(ordered[index])
                     index += 1
+                    if not merge_runs:
+                        break
                 pieces.append(gaps[run[0].index - 1])
                 if request.marker:
                     pieces.append(
@@ -1273,6 +1314,13 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
         raise ValueError("relevance compaction requires a non-empty objective (--question)")
     require_valid_unicode(text, "context text")
     require_valid_unicode(request.question, "objective")
+    if request.cache_state not in CACHE_STATES:
+        raise ValueError(f"cache_state must be one of {CACHE_STATES}, got {request.cache_state!r}")
+    cache_factors = CacheFactors(
+        read=request.cache_read_factor,
+        write=request.cache_write_factor,
+        input=request.cache_input_factor,
+    )
     blocks = split_blocks(
         text,
         min_block_chars=request.min_block_chars,
@@ -1471,11 +1519,15 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
         )
     pending: list[TextBlock] = []
     reused = 0
+    #: block id -> (cache key, decision the cache holds). Read back after the final
+    #: decisions to persist restorations (I1 ratchet) and to report sticky flips.
+    sticky_decisions: dict[str, tuple[str, str]] = {}
     for block in scoreable:
         key = _cache_key_for(block.text, block.id)
         cached = cache.get(key) if request.decisions_cache_path is not None else None
         if cached is not None:
             reused += 1
+            sticky_decisions[block.id] = (key, cached.decision)
             chars_after: int | None = None
             if cached.decision == "trim":
                 chars_after = len(
@@ -1969,6 +2021,7 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
                 content_type=ctype,
             )
             if request.decisions_cache_path is not None:
+                sticky_decisions[block.id] = (_cache_key_for(block.text, block.id), decision_kind)
                 cache.put(
                     _cache_key_for(block.text, block.id),
                     objective=request.question,
@@ -2022,7 +2075,15 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
     # The typed graph makes cross-block dependencies explicit; the verifier restores
     # dropped evidence linked to kept content, up to a bounded restoration budget.
     relationship_edges = 0
-    blocks_restored = 0
+    # A restoration persisted by the sticky ratchet on an earlier pass is still a restored
+    # block in this output: count it, so warm and cold runs report the same figure.
+    blocks_restored = sum(
+        1
+        for decision in decisions.values()
+        if decision.source == "reused"
+        and decision.decision == "keep"
+        and decision.reason in _RESTORATION_REASONS
+    )
     sufficiency_checks = 0
     sufficiency_failures = 0
     sufficiency_confidence: float | None = None
@@ -2417,6 +2478,35 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
             "semantic verification was requested but no Jev client exists"
         )
 
+    # --- sticky ratchet (cache invariant I1): a restoration that keeps a block the cache
+    # holds as drop/trim is persisted, so the block stays kept on every later pass of this
+    # epoch instead of flip-flopping with the restoration budget. A flip of a decision that
+    # was *reused* this pass rewrites bytes an earlier pass emitted: report it as an epoch.
+    sticky_flips: list[str] = []
+    block_text_by_id = {b.id: b.text for b in blocks}
+    for final in ordered:
+        held = sticky_decisions.get(final.id)
+        if held is None or final.decision == held[1] or final.decision != "keep":
+            continue
+        if final.source == "reused":
+            sticky_flips.append(final.id)
+        if request.decisions_cache_path is not None:
+            cache.put(
+                held[0],
+                objective=request.question,
+                block_text=block_text_by_id[final.id],
+                entry=CachedDecision(
+                    score=final.score, decision="keep", provider="ratchet", reason=final.reason
+                ),
+            )
+    if sticky_flips:
+        warnings.append(
+            f"cache_epoch_opened: {len(sticky_flips)} sticky decision(s) flipped to keep "
+            f"({', '.join(sticky_flips[:8])}); bytes emitted by an earlier pass changed, so a "
+            "warm prefix cache is invalidated from the first of them. The flip is persisted "
+            "and will not repeat."
+        )
+
     before_count = count_tokens(text, request.model)
     after_count = count_tokens(compacted, request.model)
     if first_mutation_offset is None:
@@ -2462,16 +2552,54 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
         dropped_tokens = max(0, before_count.value - after_count.value)
         if invalidated_tokens and dropped_tokens:
             # docs/CACHE_ALIGNMENT.md factors: read 0.10x, write 1.25x.
-            saving_per_reuse = dropped_tokens * _CACHE_READ_FACTOR
-            invalidation_cost = invalidated_tokens * (_CACHE_WRITE_FACTOR - _CACHE_READ_FACTOR)
-            break_even_reuses = round(invalidation_cost / saving_per_reuse, 1)
-            if break_even_reuses > 1.0:
+            saving_per_reuse = dropped_tokens * cache_factors.read
+            invalidation_cost = invalidated_tokens * (cache_factors.write - cache_factors.read)
+            break_even_reuses = (
+                round(invalidation_cost / saving_per_reuse, 1)
+                if saving_per_reuse > 0
+                else None
+            )
+            if break_even_reuses is not None and break_even_reuses > 1.0:
                 warnings.append(
                     f"cache_epoch_risk: this pass invalidates {invalidated_tokens} tokens at "
                     f"offset {first_mutation_offset} to drop {dropped_tokens}; it only pays off "
                     f"after ~{break_even_reuses:g} reuses of the pruned context. Protect the "
                     f"prefix (--prefix-marker/--protect-prefix) or wait for a cache epoch."
                 )
+
+    # --- cache contract: what the provider cache holds (the input, or the previous pass's
+    # output) against the uncompacted and the compacted request.
+    if request.previous_compacted_text is not None:
+        cached_text = request.previous_compacted_text
+        cache_baseline = "previous_output"
+    else:
+        cached_text = text
+        cache_baseline = "input"
+
+    def _prefix_tokens(candidate: str, full_tokens: int) -> int:
+        shared = common_prefix_chars(cached_text, candidate)
+        if shared == len(candidate):
+            return full_tokens
+        return count_tokens(candidate[:shared], request.model).value
+
+    stable_chars = common_prefix_chars(cached_text, compacted)
+    cache_effect = estimate_cache_effect(
+        baseline_tokens=(
+            before_count.value
+            if cached_text is text
+            else count_tokens(cached_text, request.model).value
+        ),
+        no_pass_tokens=before_count.value,
+        no_pass_stable_tokens=_prefix_tokens(text, before_count.value),
+        pass_tokens=after_count.value,
+        pass_stable_tokens=_prefix_tokens(compacted, after_count.value),
+        cache_state=request.cache_state,
+        expected_reuses=request.expected_reuses,
+        factors=cache_factors,
+        baseline=cache_baseline,
+        epoch_opened=stable_chars < len(cached_text) or bool(sticky_flips),
+        sticky_flips=tuple(sticky_flips),
+    ).to_dict()
 
     # --- marker economics: markers cost tokens too; a pass whose markers erase its
     # saving is pathological and must say so explicitly.
@@ -2541,6 +2669,7 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
         semantic_guarantee=semantic_guarantee,
         invalidated_tokens=invalidated_tokens,
         break_even_reuses=break_even_reuses,
+        cache_effect=cache_effect,
         tokenizer=tokenizer_identity_for_count(after_count)["tokenizer"],
         tokenizer_id=tokenizer_identity_for_count(after_count)["tokenizer_id"],
         tokenizer_version=tokenizer_identity_for_count(after_count)["tokenizer_version"],
@@ -2689,6 +2818,7 @@ def report_to_dict(report: RelevanceCompactionReport) -> dict[str, Any]:
         "semantic_guarantee": report.semantic_guarantee,
         "invalidated_tokens": report.invalidated_tokens,
         "break_even_reuses": report.break_even_reuses,
+        "cache_effect": report.cache_effect,
         "needs_review": report.needs_review,
         "review_reason": report.review_reason,
         "semantic_verifier_sufficient": report.semantic_verifier_sufficient,

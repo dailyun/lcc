@@ -49,6 +49,9 @@ jobs:
     - name: Judge benchmark smoke (synthetic, gated on no crash + recall floors)
       run: |
         python3 benchmarks/run_judge_bench.py --check --out "$RUNNER_TEMP/judge-bench"
+    - name: Prefix stability smoke (cache contract invariants, synthetic, no network)
+      run: |
+        python3 benchmarks/cache/run_prefix_stability.py --check --out "$RUNNER_TEMP/prefix-stability"
 
   test-node:
     runs-on: ubuntu-latest

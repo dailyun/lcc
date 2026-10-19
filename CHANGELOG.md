@@ -118,6 +118,62 @@ All notable changes to this project are documented here. The format is based on
   window could be dropped together with its result inside the window. Both are now kept
   (`duplicate_tool_use_id`, `pinned_recent_result`), as the lossless and recoverable modes
   already did.
+### Added
+
+- **Cache contract as code (`lcc.relevance.cache_contract`).** The prompt-cache invariants of a
+  compaction pass are now defined and tested (`docs/CACHE_ALIGNMENT.md`, "Invariants and
+  tests"): I1 prefix stability within an epoch, I2 deterministic placeholders, I3 no
+  non-deterministic fields in emitted text, I4 append never rewrites earlier output unless an
+  epoch is reported. Pure helpers: `common_prefix_chars`, `prefix_stability`,
+  `cache_state_from_idle` (exact TTL is cold, negative gap is clock skew and counts as warm,
+  missing timestamps are unknown), `estimate_cache_effect`.
+- **`cache_effect` in the `relevance-compaction` and `transcript-compaction` reports**
+  (additive field; ADR 0004, so neither `schema_version` changes): stable prefix,
+  `invalidated_prefix_tokens`, `rewritten_tokens`, `removed_tokens`, the relative cost of the
+  pass vs no pass under configurable read/write/input multipliers (defaults 0.10x/1.25x/1x, no
+  prices), `recommended`, `epoch_opened` and `sticky_flips`. `unknown` cache state is priced as
+  warm. New request fields / CLI flags (block mode): `--cache-state`, `--expected-reuses`,
+  `--previous-output` (measure against what the provider actually caches),
+  `--cache-read-factor`, `--cache-write-factor`; MCP `compact_transcript` takes `cache_state`,
+  and the idle stash sends `cold` (`unknown` for a manual `/compact lcc:idle`).
+  `break_even_reuses` now uses the configured factors (same figure at the defaults).
+- **`benchmarks/cache/run_prefix_stability.py`** (`--check`, CI step): grows seeded synthetic
+  sessions turn by turn with a pass in between and reports the byte-identical prefix share.
+  Defaults (12 seeds): block compaction append-only on 96.2% of passes (mean stable share
+  0.975), every break a reported sticky flip; the old merged-marker behaviour scores 82.6%
+  with 18 unexplained breaks. Stashed transcript passes: 0 idempotence violations, 0
+  placeholder rewrites.
+- `test/hook-cache.test.mjs`: idle stash TTL boundaries, `idleMinRemovableTokens` boundary,
+  pass cap, every fail-safe path, idempotent placeholders.
+
+### Changed
+
+- **With `--decisions-cache`, every dropped block gets its own marker** (format unchanged:
+  `[lcc-compact: dropped 1 block (N chars)]`). A merged run marker counted the whole run, so a
+  run at the tail that grew on the next pass rewrote `dropped 1 block` as `dropped 2 blocks`
+  inside the cached prefix. One-shot passes (no decisions cache) still merge runs;
+  `RelevanceCompactionRequest.merge_dropped_runs` overrides either way. Existing sticky caches
+  re-emit their markers once in the new form (one cache epoch on upgrade).
+- **Sticky ratchet for restorations.** A sufficiency or verifier restoration that keeps a block
+  the decisions cache holds as drop/trim is persisted (`provider: "ratchet"`), so it cannot flip
+  back with the restoration budget on a later pass. When it flips a decision *reused* this pass,
+  the report says so (`cache_effect.sticky_flips`, `cache_epoch_opened` warning); a ratcheted
+  restoration still counts in `blocks_restored`.
+
+### Fixed
+
+- **`rules_mode: stashed` re-stashed its own placeholders.** A second pass over stashed history
+  (a second idle stash) replaced `[removed: 693 tokens · lcc recall <id>]` with a pointer to the
+  pointer (`[removed: 11 tokens · ...]`) whenever the new note was shorter, rewriting early
+  history for ~0 tokens and making `recall` return the pointer. Existing pointers are now kept
+  (`already_stashed`); a stash pass over its own output is a no-op.
+- **Claude Code plugin: a headless engine whose `$.ui.log`/`$.ui.toast` throws** made the idle
+  stash's own error handler throw into `session.start` / `turn.complete`. UI calls are now best
+  effort.
+- **Claude Code plugin: idle pass count from a corrupted store** (`passes: "abc"`) concatenated
+  to a string on `+= 1` and never reached `idleMaxPassesPerSession`; a non-object store record
+  was spread into the new one. Both are sanitised. A negative idle gap (clock skew) now reports
+  `clock skew` instead of `cache warm` (still never fires).
 
 ## [1.2.0] - 2026-10-19
 

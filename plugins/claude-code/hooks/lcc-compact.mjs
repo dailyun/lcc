@@ -24,12 +24,26 @@ import {
   hasUnsupportedContent,
   idleDecision,
   parseToolResult,
+  passCount,
   resolveOptions,
 } from "./map.mjs";
 
+/** UI is best effort: a headless engine without a log/toast surface must not fail a hook. */
+function log($, text) {
+  try {
+    $.ui.log(text);
+  } catch {
+    // no log surface
+  }
+}
+
 function notify($, text) {
-  $.ui.log(text);
-  $.ui.toast(text, { timeoutMs: 15000 });
+  log($, text);
+  try {
+    $.ui.toast(text, { timeoutMs: 15000 });
+  } catch {
+    // no toast surface
+  }
 }
 
 function message(error) {
@@ -56,6 +70,11 @@ const IDLE_KEYS_KEPT = 64;
 // answers with refs into the transcript the hook sent: only replaced text travels back.
 const COMPACT_ANSWER = { ref_unchanged: true, ref_blocks: true };
 
+/** A stored idle record, or `{}` for anything that is not a plain object (corrupted store). */
+function idleState(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
 /** Per-session idle state in the plugin's store: `{ end, passes }`, `end` in clock ms. */
 async function remember($, key, value) {
   await $.store.set(key, value);
@@ -81,7 +100,15 @@ export async function stashIdle($, messages, configured, gap = "unknown", cwd) {
     const args = buildCompactArgs({
       messages: messages ?? [],
       options,
-      extra: { trigger: "idle", idle_gap_bucket: gap, ...COMPACT_ANSWER, ...root },
+      // An automatic pass only fires past the TTL, so the provider cache is cold; a pass typed
+      // by hand (`/compact lcc:idle`) knows nothing about the cache.
+      extra: {
+        trigger: "idle",
+        idle_gap_bucket: gap,
+        cache_state: gap === "manual" ? "unknown" : "cold",
+        ...COMPACT_ANSWER,
+        ...root,
+      },
     });
     if (!args) return { skip: "no objective to judge against" };
     const { content, isError } = await $.mcp.call(configured.server, "compact_transcript", args);
@@ -113,7 +140,7 @@ const stood = (result, gap) =>
  */
 async function idlePass($, configured, idle, when) {
   const key = IDLE_KEY_PREFIX + (await $.session.id());
-  const saved = (await $.store.get(key)) ?? {};
+  const saved = idleState(await $.store.get(key));
   const base = {
     options: configured,
     lastEnd: saved.end,
@@ -130,11 +157,11 @@ async function idlePass($, configured, idle, when) {
   if (decision.notify) notify($, `lcc: idle stash skipped (${decision.reason})`);
   if (!decision.fire) return;
   const gap = gapBucket(decision.gapSeconds);
-  $.ui.log(`lcc: idle stash starting (${when}, idle ${gap})`);
+  log($, `lcc: idle stash starting (${when}, idle ${gap})`);
   // At session.start the plugin's own server may not be connected yet.
   if (configured.server === DEFAULT_SERVER) await $.mcp.connect("lcc").catch(() => undefined);
   const result = await stashIdle($, messages, configured, gap, await $.session.cwd());
-  let passes = saved.passes ?? 0;
+  let passes = passCount(saved.passes);
   if (result.skip) {
     notify($, `lcc: idle stash skipped (${result.skip})`);
   } else {
@@ -264,10 +291,10 @@ export const register = (on, options) => {
     if (event.agentId !== undefined) return result; // subagents: 5-minute TTL, no idle
     try {
       const key = IDLE_KEY_PREFIX + (await $.session.id());
-      const saved = (await $.store.get(key)) ?? {};
+      const saved = idleState(await $.store.get(key));
       await remember($, key, { ...saved, end: await $.clock.now() });
     } catch (error) {
-      $.ui.log(`lcc: idle stash bookkeeping failed (${message(error)})`);
+      log($, `lcc: idle stash bookkeeping failed (${message(error)})`);
     }
     return result;
   });
