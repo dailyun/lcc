@@ -8,6 +8,7 @@ import {
   buildCompactArgs,
   decideReplacement,
   deriveGoal,
+  expandRefs,
   hasUnsupportedContent,
   parseToolResult,
   resolveOptions,
@@ -171,7 +172,8 @@ test("parseToolResult reads the JSON out of the MCP content blocks", () => {
   const parsed = parseToolResult([{ type: "text", text: JSON.stringify(payload) }]);
   assert.equal(parsed.report.mode, "tool-calls");
   assert.throws(() => parseToolResult([]), /empty tool result/);
-  assert.throws(() => parseToolResult([{ type: "text", text: "not json" }]), SyntaxError);
+  // What Claude Code hands back for an answer over its MCP output cap is not JSON.
+  assert.throws(() => parseToolResult([{ type: "text", text: "Error: result exceeds" }]), /not JSON .*MCP output cap/);
   assert.throws(() => parseToolResult([{ type: "text", text: "{}" }]), /not a compaction payload/);
 });
 
@@ -232,6 +234,46 @@ test("toSessionMessages keeps a failed tool result failed", () => {
     { role: "user", text: "", toolResults: [{ tool_use_id: "t", text: "boom", is_error: true }] },
   ]);
   assert.deepEqual(message.toolResults, [{ tool_use_id: "t", text: "boom", isError: true }]);
+});
+
+test("expandRefs rebuilds a ref_blocks patch from the caller's own blocks", () => {
+  const read = { tool_use_id: "r", tool: "Read", input: { file_path: "a.py" } };
+  const grep = { tool_use_id: "g", tool: "Grep", input: { pattern: "x" } };
+  const body = "head 😀 line\n".repeat(50);
+  const source = [
+    { role: "user", text: "go", handle: "h0" },
+    { role: "assistant", text: "two calls", toolUses: [read, grep], handle: "h1" },
+    {
+      role: "user", text: "", handle: "h2",
+      toolResults: [{ tool_use_id: "r", text: body }, { tool_use_id: "g", text: "hit", isError: true }],
+    },
+  ];
+  const answer = [
+    { ref: 0 },
+    { ref: 1, toolUses: [1], toolResults: [] },
+    // UTF-16 units: the emoji is two, as in the server's head count.
+    { ref: 2, toolUses: [], toolResults: [{ ref: 0, tool_use_id: "r", head: 7, text: "\n[cut]" }, 1] },
+  ];
+  const [first, second, third] = expandRefs(answer, source);
+  assert.equal(first, source[0], "an unchanged message is the caller's own object");
+  assert.deepEqual(second, { role: "assistant", text: "two calls", toolUses: [grep] });
+  assert.deepEqual(third, {
+    role: "user", text: "", toolUses: [],
+    toolResults: [{ tool_use_id: "r", text: "head 😀\n[cut]" }, source[2].toolResults[1]],
+  });
+  const tail = expandRefs([{ ref: 2, toolResults: [{ ref: 0, tool_use_id: "r", text: "[x]", tail: 5 }] }], source);
+  assert.equal(tail[0].toolResults[0].text, "[x]line\n");
+});
+
+test("expandRefs refuses a patch that does not fit the transcript", () => {
+  const source = [{ role: "user", text: "", toolResults: [{ tool_use_id: "r", text: "abc" }] }];
+  assert.throws(() => expandRefs([{ ref: 1 }], source), /outside the transcript/);
+  assert.throws(() => expandRefs([{ ref: 0, toolUses: [0] }], source), /tool use ref 0/);
+  assert.throws(() => expandRefs([{ ref: 0, toolResults: [3] }], source), /tool result ref 3/);
+  const patch = (over) => [{ ref: 0, toolResults: [{ ref: 0, tool_use_id: "r", text: "", ...over }] }];
+  assert.throws(() => expandRefs(patch({ tool_use_id: "other" }), source), /does not fit/);
+  assert.throws(() => expandRefs(patch({ head: 2, tail: 2 }), source), /does not fit/);
+  assert.throws(() => expandRefs(patch({ head: -1 }), source), /does not fit/);
 });
 
 let failed = 0;

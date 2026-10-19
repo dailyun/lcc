@@ -230,7 +230,13 @@ export function parseToolResult(content) {
     .map((block) => block.text)
     .join("");
   if (!text.trim()) throw new Error("empty tool result");
-  const payload = JSON.parse(text);
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    // What Claude Code hands back for an answer over its MCP result cap.
+    throw new Error(`tool result is not JSON (${text.length} chars; over Claude Code's MCP output cap?)`);
+  }
   if (!payload?.report || !Array.isArray(payload.messages)) {
     throw new Error("tool result is not a compaction payload");
   }
@@ -272,17 +278,52 @@ export function decideReplacement({ report, messages, minReductionRatio }) {
 }
 
 /**
- * Expands a `ref_unchanged` answer: `{ ref: i }` is `source[i]`, the caller's own message
- * (with its engine `handle`, when it had one); anything else is rebuilt. Throws on a ref
- * outside `source`, so a mismatched answer never reaches the session.
+ * Expands a `ref_unchanged` / `ref_blocks` answer against `source`, the transcript the hook
+ * sent. `{ ref: i }` is `source[i]`, the caller's own message (with its engine `handle`, when
+ * it had one). `{ ref: i, toolUses, toolResults }` is `source[i]` rebuilt from the kept blocks:
+ * a number is a block of `source[i]`, `{ ref, tool_use_id, text, head?, tail? }` a replaced
+ * result, `source text[:head] + text + source text[-tail:]` (UTF-16 units, JavaScript's own).
+ * Anything else is a whole message. Throws on any ref that does not fit `source`, so a
+ * mismatched answer never reaches the session.
  */
 export function expandRefs(messages, source) {
+  const at = (list, index, what) => {
+    if (!Number.isInteger(index) || index < 0 || index >= (list?.length ?? 0)) {
+      throw new Error(`${what} ref ${index} outside the transcript`);
+    }
+    return list[index];
+  };
   return (messages ?? []).map((message) => {
     if (typeof message?.ref !== "number") return toSessionMessages([message])[0];
-    if (!Number.isInteger(message.ref) || message.ref < 0 || message.ref >= (source?.length ?? 0)) {
-      throw new Error(`ref ${message.ref} outside the transcript`);
-    }
-    return source[message.ref];
+    const original = at(source, message.ref, "message");
+    if (!("toolUses" in message) && !("toolResults" in message)) return original;
+    const toolResults = (message.toolResults ?? []).map((block) => {
+      if (typeof block === "number") return at(original.toolResults, block, "tool result");
+      const before = at(original.toolResults, block?.ref, "tool result");
+      const text = before?.text;
+      const head = block.head ?? 0;
+      const tail = block.tail ?? 0;
+      if (
+        typeof text !== "string" || typeof block.text !== "string" ||
+        before.tool_use_id !== block.tool_use_id ||
+        !Number.isInteger(head) || !Number.isInteger(tail) || head < 0 || tail < 0 ||
+        head + tail > text.length
+      ) {
+        throw new Error(`tool result patch does not fit message ${message.ref}`);
+      }
+      return {
+        tool_use_id: before.tool_use_id,
+        text: text.slice(0, head) + block.text + (tail ? text.slice(text.length - tail) : ""),
+        ...(before.isError === true || before.is_error === true ? { isError: true } : {}),
+      };
+    });
+    const entry = {
+      role: original.role,
+      text: original.text,
+      toolUses: (message.toolUses ?? []).map((index) => at(original.toolUses, index, "tool use")),
+    };
+    if (toolResults.length) entry.toolResults = toolResults;
+    return entry;
   });
 }
 

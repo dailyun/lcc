@@ -29,6 +29,21 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- **Claude Code plugin: `/compact` on a long session always fell back to the built-in summary.**
+  The `session.compact` hook asked `compact_transcript` for the whole compacted conversation.
+  Claude Code caps an MCP result (`MAX_MCP_OUTPUT_TOKENS`, 25,000 tokens by default on 2.1.296)
+  and hands a plugin's `$.mcp.call` a pointer text in place of a larger one, so on any session
+  worth compacting the answer was not JSON and the hook stood down. The hook now asks for
+  `ref_blocks: true` (below) and rebuilds the conversation from the session's own messages; the
+  idle stash uses it too. A capped answer now toasts `built-in summary (tool result is not JSON
+  (N chars; over Claude Code's MCP output cap?))` instead of a JSON parse error.
+- **`compact_transcript`: `ref_blocks: true`.** `ref_unchanged` down to the block: a changed
+  message comes back as `{"ref": i, "toolUses": [kept indices], "toolResults": [kept index |
+  {"ref", "tool_use_id", "text", "head"?, "tail"?}]}`, a replaced result being the original's
+  first `head` and last `tail` UTF-16 units around `text`. Only placeholders and trim notes
+  travel. On a synthetic 40-output, 1 MB transcript (`rules_mode: lossy`) the whole answer is
+  1.5 MB, `ref_unchanged` 10.6 KB and `ref_blocks` 2.1 KB; `ref_unchanged` grows with every
+  trimmed result it sends whole (86 KB for 21 trims on another shape, against 6.3 KB).
 - **`recoverable` / `stashed` disk check vs Claude Code's Read format.** Claude Code 2.1.296
   numbers the empty line after a file's final newline (`480\t` for a 479-line file), so every
   whole-file read of a newline-terminated file failed the disk check (`keep_disk_mismatch`)

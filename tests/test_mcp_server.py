@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -512,3 +513,145 @@ def test_ref_unchanged_sends_changed_and_dropped_messages_whole():
     # Equal messages map in order, never backwards.
     assert _ref_unchanged([a, a, b], [a, a, b]) == [{"ref": 0}, {"ref": 1}, {"ref": 2}]
     assert _ref_unchanged([a, b], [b, a]) == [{"ref": 1}, a]
+
+
+def _expand_blocks(answer: list[dict], source: list[dict]) -> list[dict]:
+    """The hook's expandRefs, in Python: UTF-16 offsets, as JavaScript's ``slice`` counts."""
+
+    def splice(text: str, block: dict) -> str:
+        units = text.encode("utf-16-le")
+        head, tail = block.get("head", 0) * 2, block.get("tail", 0) * 2
+        end = units[len(units) - tail :] if tail else b""
+        return units[:head].decode("utf-16-le") + block["text"] + end.decode("utf-16-le")
+
+    out = []
+    for message in answer:
+        if "ref" not in message:
+            out.append(message)
+            continue
+        original = source[message["ref"]]
+        if "toolUses" not in message and "toolResults" not in message:
+            out.append(original)
+            continue
+        entry = {"role": original["role"], "text": original["text"]}
+        if message["toolUses"]:
+            entry["toolUses"] = [original["toolUses"][i] for i in message["toolUses"]]
+        results = [
+            original["toolResults"][block] if isinstance(block, int)
+            else {"tool_use_id": block["tool_use_id"],
+                  "text": splice(original["toolResults"][block["ref"]]["text"], block)}
+            for block in message["toolResults"]
+        ]
+        if results:
+            entry["toolResults"] = results
+        out.append(entry)
+    return out
+
+
+def _ci_transcript(runs: int = 40) -> list[dict]:
+    """A long session: ``runs`` large command outputs, two of them per message (parallel calls)."""
+    messages: list[dict] = [{"role": "user", "text": "Summarise the build failures in the CI logs."}]
+    for i in range(0, runs, 2):
+        ids = (f"t{i}", f"t{i + 1}")
+        messages.append({"role": "assistant", "text": "", "toolUses": [
+            {"tool_use_id": t, "tool": "Bash", "input": {"command": f"cat logs/{t}.txt"}}
+            for t in ids]})
+        messages.append({"role": "user", "text": "", "toolResults": [
+            {"tool_use_id": t, "text": f"{t} step ok ✓ \U0001f600\n" * 1200} for t in ids]})
+    messages.append({"role": "assistant", "text": "Looked at all runs."})
+    messages.append({"role": "user", "text": "Now list which runs failed."})
+    return messages
+
+
+@pytest.mark.parametrize("rules_mode", ["lossy", "stashed"])
+def test_ref_blocks_answer_stays_small_and_expands_to_the_full_answer(
+    rules_mode, tmp_path, monkeypatch
+):
+    # Regression: Claude Code caps an MCP result (MAX_MCP_OUTPUT_TOKENS, 25,000 tokens by
+    # default) and hands a plugin's $.mcp.call a pointer text instead, so /compact on a long
+    # session always fell back to the built-in summary. The answer must not grow with it.
+    monkeypatch.setenv("LCC_STASH_DIR", str(tmp_path))
+    messages = _ci_transcript()
+
+    def call(**extra):
+        resp = handle_message(
+            {"jsonrpc": "2.0", "id": 12, "method": "tools/call",
+             "params": {"name": "compact_transcript",
+                        "arguments": {"messages": messages, "question": "which runs failed",
+                                      "provider": "rules", "rules_mode": rules_mode,
+                                      **extra}}}
+        )
+        assert resp is not None and "error" not in resp
+        return resp["result"]["content"][0]["text"]
+
+    full = json.loads(call())
+    text = call(ref_unchanged=True, ref_blocks=True)
+    assert len(json.dumps(messages)) > 1_000_000
+    assert len(text) < 20_000, len(text)  # far under 25,000 tokens, whatever the tokenizer
+    answer = json.loads(text)
+    removed = sum(answer["report"][f"tool_calls_{k}"] for k in ("trimmed", "replaced", "dropped"))
+    assert removed > 0
+    assert _expand_blocks(answer["messages"], messages) == full["messages"]
+
+
+def test_ref_blocks_expands_identically_in_the_hook(tmp_path):
+    # The same answer through the plugin's own expandRefs (node), byte for byte.
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node not installed")
+    messages = _ci_transcript()
+    resp = handle_message(
+        {"jsonrpc": "2.0", "id": 13, "method": "tools/call",
+         "params": {"name": "compact_transcript",
+                    "arguments": {"messages": messages, "question": "which runs failed",
+                                  "provider": "rules", "rules_mode": "lossy",
+                                  "ref_blocks": True}}}
+    )
+    assert resp is not None
+    answer = json.loads(resp["result"]["content"][0]["text"])
+    assert answer["report"]["tool_calls_trimmed"] > 0
+    (tmp_path / "in.json").write_text(json.dumps({"answer": answer["messages"], "source": messages}))
+    hook = Path(__file__).resolve().parents[1] / "plugins/claude-code/hooks/map.mjs"
+    script = (
+        f"import {{ expandRefs }} from {json.dumps(hook.as_uri())};"
+        "import { readFileSync } from 'node:fs';"
+        "const { answer, source } = JSON.parse(readFileSync(process.argv[1], 'utf8'));"
+        "process.stdout.write(JSON.stringify(expandRefs(answer, source)));"
+    )
+    out = subprocess.run(
+        [node, "--input-type=module", "-e", script, str(tmp_path / "in.json")],
+        capture_output=True, text=True, check=True,
+    )
+    expected = _expand_blocks(answer["messages"], messages)
+    got = json.loads(out.stdout)
+    # The hook rebuilds every changed message with an explicit (possibly empty) toolUses list.
+    for message in got:
+        if message.get("toolUses") == []:
+            del message["toolUses"]
+    assert got == expected
+
+
+def test_ref_blocks_patches_only_what_changed():
+    from lcc.mcp_server import _ref_blocks, _splice
+
+    use = {"tool_use_id": "a", "tool": "Read", "input": {}}
+    other = {"tool_use_id": "b", "tool": "Grep", "input": {}}
+    source = [
+        {"role": "assistant", "text": "x", "toolUses": [use, other]},
+        {"role": "user", "text": "", "toolResults": [
+            {"tool_use_id": "a", "text": "keep"}, {"tool_use_id": "b", "text": "abcdef"}]},
+    ]
+    compacted = [
+        {"role": "assistant", "text": "x", "toolUses": [other]},
+        {"role": "user", "text": "", "toolResults": [
+            {"tool_use_id": "a", "text": "keep"}, {"tool_use_id": "b", "text": "ab[cut]"}]},
+    ]
+    assert _ref_blocks(source, compacted, [0, 1]) == [
+        {"ref": 0, "toolUses": [1], "toolResults": []},
+        {"ref": 1, "toolUses": [], "toolResults": [
+            0, {"ref": 1, "tool_use_id": "b", "head": 2, "text": "[cut]"}]},
+    ]
+    # A message whose text changed is sent whole; head/tail count UTF-16 units.
+    assert _ref_blocks(source, [{"role": "assistant", "text": "y"}], [0]) == [
+        {"role": "assistant", "text": "y"}]
+    assert _splice("\U0001f600ab", "\U0001f600a!") == {"text": "!", "head": 3}

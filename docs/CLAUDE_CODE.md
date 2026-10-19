@@ -112,10 +112,9 @@ Guards:
   `custom_instructions: "lcc:idle"` and blocks it. On a cold 300k-token cache the built-in
   summary is the most expensive outcome there is.
 - Never on subagents, and never twice over the same history: a second pass needs a new turn.
-- The pass asks `compact_transcript` for `ref_unchanged: true`. Claude Code caps an MCP result
-  (`MAX_MCP_OUTPUT_TOKENS`) and hands back an error text for a larger one: a 12-message session
-  with four 10 KB reads already crossed it. Unchanged messages come back as `{ "ref": i }` and
-  are taken from the session's own copy.
+- The pass asks `compact_transcript` for `ref_unchanged` and `ref_blocks`, like `/compact`
+  (see [the MCP result cap](#the-mcp-result-cap)): a 12-message session with four 10 KB reads
+  already crossed the cap.
 - It sends the session directory as `workspace_root`, so `stashed` can take file reads the
   disk still holds. Reads under a system temp directory are never stashed (a `rules` rule).
 
@@ -216,6 +215,41 @@ lcc: built-in summary (below the 25% minimum (4.2%))
 lcc: built-in summary (judge unavailable (jev_unavailable_fail_safe))
 ```
 
+## The MCP result cap
+
+Claude Code caps an MCP tool result at `MAX_MCP_OUTPUT_TOKENS`: 25,000 tokens by default on
+2.1.296 (the binary's default; a server-side flag can change it, the environment variable wins).
+A larger result is not truncated JSON: the plugin's `$.mcp.call` gets a pointer text to a saved
+file. Through 1.1.0 the hook asked for the whole compacted conversation, so on any session long
+enough to be worth compacting the answer was over the cap, the hook could not parse it and
+Claude Code's own summary ran.
+
+The hook now asks for `ref_unchanged: true, ref_blocks: true`. The server answers with refs into
+the transcript the hook sent: `{ "ref": i }` for an unchanged message, and for a changed one the
+indices of the kept tool calls and results plus, for each replaced result, only its new text
+between the original's first `head` and last `tail` characters (UTF-16 units). Placeholders and
+trim notes travel; file contents do not. The hook rebuilds the messages from the session's own
+copy and throws on any ref that does not fit, which falls back to the built-in summary. An
+answer that is still over the cap toasts `lcc: built-in summary (tool result is not JSON (N
+chars; over Claude Code's MCP output cap?))`.
+
+Evidence. In the owner's session logs from 2026-10-07 to 2026-10-19 (plugin installed, function
+hooks on, `provider: rules`, `rulesMode: stashed`), every `/compact` of a real session (209k to
+860k tokens, 27 boundaries) wrote Claude Code's summary (50 to 115 s each); the plugin's
+verbatim pass stood only on disposable test sessions of about 58k to 84k tokens. Those logs hold
+no toasts, so the cap is the likely cause, not a measured one (INFERIDO). A disposable session
+then reproduced it (Claude Code 2.1.296, Haiku, subscription login, plugin from `--plugin-dir`,
+the installed `lcc@lcc` off for the run, same options; twelve 30 KB files read, then `/compact`;
+n=1 per row):
+
+| Hook | `compact_transcript` answer | Outcome |
+| :--- | :--- | :--- |
+| before (whole messages) | 157.8 KB, saved to a file by Claude Code; the hook got a 1,365-char text | `lcc: built-in summary (JSON Parse error: Unexpected identifier "Error")`, summary ran |
+| after (`ref_blocks`), twice | 3,002 / 3,003 chars | `lcc: verbatim compaction via rules, no summary (kept 26 messages, ... replaced 8)`; "a hook's 26 messages stand ... core never ran" |
+
+After the fix the agent quoted a placeholder (`[removed: 8354 tokens · lcc recall <id>]`),
+called `recall` and named the first function of the recalled file correctly.
+
 ## What is verified, and what is not
 
 Verified: `claude plugin validate plugins/claude-code` passes and reports the registered
@@ -225,7 +259,7 @@ from this repository's marketplace with the documented commands (`claude plugin 
 user scope with its eight `userConfig` options reported), and `claude plugin details lcc` lists
 the plugin's MCP server. The hook's mapping logic — option coercion, transcript mapping,
 tool-result parsing, the replacement decision and the fallback on unsupported content — is
-covered by `node test/hook-map.test.mjs` (15 cases, run by `npm test` and by CI); the Python side
+covered by `node test/hook-map.test.mjs` (19 cases, run by `npm test` and by CI); the Python side
 is covered by `tests/test_transcript_compaction.py`, `tests/test_cli_tool_calls.py` and
 `tests/test_mcp_server.py`.
 
