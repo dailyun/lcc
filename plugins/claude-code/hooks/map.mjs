@@ -117,20 +117,34 @@ export function gapBucket(seconds) {
 }
 
 /**
+ * A pass count read back from the plugin store. Anything that is not a non-negative finite
+ * number (a hand-edited or corrupted store) counts as 0 rather than turning `passes += 1`
+ * into string concatenation that never reaches `idleMaxPassesPerSession`.
+ */
+export function passCount(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0;
+}
+
+/**
  * Should an idle stash run now? `fire: false` carries a `reason`; `notify` marks the ones
  * worth a toast (the gap is past the TTL, so the user would expect a pass).
+ *
+ * Cache contract edges (mirrored by `lcc.relevance.cache_contract.cache_state_from_idle`):
+ * a gap exactly at `idleTtlSeconds` is cold; a negative gap (clock skew) or a missing /
+ * non-finite timestamp never counts as cold, because a wrong "cold" rewrites a warm prefix.
  */
 export function idleDecision({ options, lastEnd, passedEnd, now, passes, removable }) {
   const config = resolveOptions(options);
   if (!config.idleStash) return { fire: false, reason: "off" };
-  if (typeof lastEnd !== "number" || typeof now !== "number") {
+  if (!Number.isFinite(lastEnd) || !Number.isFinite(now)) {
     return { fire: false, reason: "no previous request" };
   }
   // Never twice over the same history: a pass needs a new request after the last one.
   if (passedEnd === lastEnd) return { fire: false, reason: "already stashed since the last request" };
   const gapSeconds = (now - lastEnd) / 1000;
+  if (gapSeconds < 0) return { fire: false, reason: "clock skew (last request is in the future)", gapSeconds };
   if (!(gapSeconds >= config.idleTtlSeconds)) return { fire: false, reason: "cache warm", gapSeconds };
-  if ((passes ?? 0) >= config.idleMaxPassesPerSession) {
+  if (passCount(passes) >= config.idleMaxPassesPerSession) {
     return { fire: false, notify: true, gapSeconds, reason: `${config.idleMaxPassesPerSession} passes already this session` };
   }
   if (typeof removable === "number" && removable < config.idleMinRemovableTokens) {
