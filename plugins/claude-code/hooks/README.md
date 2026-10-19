@@ -35,11 +35,16 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir plugins/claude-code
 
 ## What runs, and when
 
-The plugin registers one hook:
+The plugin registers one function hook and two classic hooks:
 
 | Event | What it does |
 | :--- | :--- |
 | `session.compact` | Sends the transcript to `compact_transcript`, replaces the conversation with the compacted one when the pass was judged and removed something, otherwise calls `next(event)` so Claude Code's own summary runs |
+| `PreCompact` (classic) | Prints the session objective, edited/read files and the last tool error, asking the built-in summary to keep them verbatim (`scripts/lcc-pin.mjs precompact`) |
+| `SessionStart`, matcher `compact` (classic) | Re-pins the same facts after the summary (`scripts/lcc-pin.mjs sessionstart`) |
+
+The two classic hooks need neither the function-hook flag nor a key: without the flag they are
+the whole plugin, and the built-in summary keeps paths, identifiers and the last error verbatim.
 
 Every outcome is reported in one toast and one log line, and each per-call decision is in
 the report the tool returns:
@@ -54,8 +59,11 @@ decides what a compaction produces. Configure `minReductionRatio`, `preserveRece
 `threshold`, `trimHeadChars`, `maxStateTokens`, `maxRequestTokens` and `question` through the
 plugin's config (`/plugin` → lcc, or `claude plugin install --config key=value`).
 
-`rulesMode` (with `provider: rules`) picks `lossless`, `recoverable` or `lossy`; empty keeps the
-server default. With `recoverable` the hook sends the session's working directory as
+`rulesMode` (with `provider: rules`) picks `lossless`, `recoverable`, `stashed` or `lossy`; empty
+keeps the server default. With `stashed`, each removed tool output is written to the local stash
+(`~/.cache/lcc/stash`, or `LCC_STASH_DIR`) and replaced by `[removed: N tokens · lcc recall <id>]`;
+the agent gets the exact bytes back with the plugin's `recall` tool, so allow
+`mcp__plugin_lcc_lcc__recall` as well. With `recoverable` the hook sends the session's working directory as
 `workspace_root`, so every removed file read is checked against the file on disk. The
 directory is the event's `cwd` field when it is an absolute path, else the hook process's
 `process.cwd()` (function hooks run inside the session's process).
@@ -81,11 +89,15 @@ It also skips `precompute` invocations, which install nothing.
 
 ## Limitations, stated plainly
 
-- **Never fired by an editor yet.** The manifest validates, the plugin installs from the
-  marketplace, and the mapping logic is unit-tested — but no `/compact` in a real Claude Code
-  session has been intercepted, because the author does not have a Claude Code subscription. If
-  you have Claude Code 2.1.274+ and a TypeSafe key, you are the first person who can close that
-  gap; the whole test is `/compact` in a long session plus reading the toast.
+- **Fired end to end on one session shape.** Claude Code 2.1.296 ran a real `/compact` through
+  this hook; it needed three fixes first (no `process` in the hook worker, the server name
+  `plugin:lcc:lcc`, `isError` on rebuilt results). Counts are in
+  [`docs/CLAUDE_CODE.md`](../../../docs/CLAUDE_CODE.md#observed-end-to-end-claude-code-21296-2026-10-16).
+- **No native re-attachments after a replacement.** When the hook's messages stand, Claude Code
+  does not re-read recent files or re-announce tools, MCP instructions or the environment, and
+  `PreCompact` does not run. Only `SessionStart` hooks (including `lcc`'s re-pin) run.
+- **Permission.** `$.mcp.call` is permission-checked: allow
+  `mcp__plugin_lcc_lcc__compact_transcript`, or every compaction falls back to the summary.
 - **Early access surface.** Function hooks (`hooks/hooks.json` modules, `session.compact`)
   require `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` and Claude Code 2.1.274+; the API may change
   between releases. The hook is written in plain ESM (`.mjs`), no build step, no dependencies.
@@ -103,5 +115,6 @@ It also skips `precompute` invocations, which install nothing.
 
 ```bash
 node test/hook-map.test.mjs        # the mapping helpers, no engine needed
+node test/hook-pin.test.mjs        # the PreCompact / SessionStart fallback
 claude plugin validate plugins/claude-code
 ```

@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **Claude Code plugin: `rulesMode: "stashed"`.** The plugin accepted only `lossless`,
+  `recoverable` and `lossy`, so the stashed mode could not be picked from Claude Code. Docs now
+  recommend `stashed` with the `recall` tool, with the one measured run (INFERIDO) in
+  `docs/TOOL_CALLS.md`.
+
 - **`rules_mode: "stashed"` and `lcc recall`.** Tool-call compaction can now remove what
   `lossy` drops or trims and what `recoverable` replaces without losing it: the exact bytes go
   to a local content-addressed stash (`~/.cache/lcc/stash`, `0700`/`0600`, `LCC_STASH_DIR`)

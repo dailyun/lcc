@@ -38,6 +38,14 @@ assert.equal((await argsSent({}, RECOVERABLE)).workspace_root, process.cwd());
 assert.equal((await argsSent({ cwd: "rel" }, RECOVERABLE)).workspace_root, process.cwd());
 assert.equal(sessionCwd({ cwd: "/x" }), "/x");
 assert.equal(sessionCwd(undefined), process.cwd());
+// Claude Code's hook worker has no `process`: no throw, no workspace root.
+const realProcess = globalThis.process;
+globalThis.process = undefined;
+try {
+  assert.equal(sessionCwd({}), undefined);
+} finally {
+  globalThis.process = realProcess;
+}
 // Lossless and the default mode never send a workspace root.
 assert.equal("workspace_root" in (await argsSent({ cwd: "/s" }, { provider: "rules", rulesMode: "lossless" })), false);
 assert.equal("workspace_root" in (await argsSent({ cwd: "/s" }, {})), false);

@@ -5,7 +5,8 @@
 
 /** Plugin options, with the defaults the README documents. */
 export const DEFAULT_OPTIONS = {
-  server: "lcc",
+  // Claude Code names a plugin's MCP server plugin:<plugin>:<server>.
+  server: "plugin:lcc:lcc",
   question: "",
   // 'auto' is the local specialist-v3 ranker; 'jev' (remote) is opt-in.
   provider: "auto",
@@ -37,7 +38,7 @@ export function resolveOptions(options = {}) {
   if (["jev", "laya", "auto", "rules", "specialist-v3"].includes(String(options.provider))) {
     merged.provider = String(options.provider);
   }
-  if (["lossless", "lossy", "recoverable"].includes(String(options.rulesMode))) {
+  if (["lossless", "lossy", "recoverable", "stashed"].includes(String(options.rulesMode))) {
     merged.rulesMode = String(options.rulesMode);
   }
   merged.threshold = number(options.threshold, DEFAULT_OPTIONS.threshold);
@@ -203,7 +204,14 @@ export function toSessionMessages(messages) {
       text: typeof message.text === "string" ? message.text : "",
       toolUses: message.toolUses ?? [],
     };
-    if (message.toolResults?.length) entry.toolResults = message.toolResults;
+    if (message.toolResults?.length) {
+      // The engine rebuilds `is_error` from `isError` only; the MCP payload says `is_error`.
+      entry.toolResults = message.toolResults.map((result) => ({
+        tool_use_id: result.tool_use_id,
+        text: typeof result.text === "string" ? result.text : "",
+        ...(result.is_error === true || result.isError === true ? { isError: true } : {}),
+      }));
+    }
     return entry;
   });
 }
