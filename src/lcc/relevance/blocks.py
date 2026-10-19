@@ -9,16 +9,23 @@ Segmentation is local-only and deterministic: no model calls, no network access,
 tokenizer downloads. Fenced code runs (``` / ~~~) are kept intact as single segments;
 everything else splits on blank lines. Oversized segments are split further at line
 boundaries so a single huge dump can still be partially pruned.
+
+Lines end at ``\n``, ``\r\n`` or a lone ``\r`` (universal newlines, as editors and ``open()``
+count them); other Unicode separators such as U+2028 or a form feed are characters inside a
+line. A leading byte-order mark does not hide a code fence on the first line.
 """
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import re
 from dataclasses import dataclass
 
-BLOCK_ID_RE = re.compile(r"^blk_[0-9]{4}_[0-9a-f]{12}$")
-_FENCE_OPEN_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<fence>`{3,}|~{3,})")
+#: Index is zero-padded to four digits and grows past 9999 on very large inputs.
+BLOCK_ID_RE = re.compile(r"^blk_[0-9]{4,}_[0-9a-f]{12}$")
+_FENCE_OPEN_RE = re.compile(r"^\ufeff?(?P<indent>[ \t]*)(?P<fence>`{3,}|~{3,})")
+_LINE_RE = re.compile(r"[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+")
 DEFAULT_MIN_BLOCK_CHARS = 80
 DEFAULT_MAX_BLOCK_CHARS = 6000
 
@@ -45,15 +52,12 @@ def block_id(index: int, text: str) -> str:
 
 
 def _split_lines(text: str) -> list[tuple[int, int]]:
-    """Return ``(start, end)`` offsets for every line, end exclusive, newlines included."""
-    spans: list[tuple[int, int]] = []
-    offset = 0
-    for line in text.splitlines(keepends=True):
-        spans.append((offset, offset + len(line)))
-        offset += len(line)
-    if offset < len(text):  # defensive: text not ending in newline and splitlines gap
-        spans.append((offset, len(text)))
-    return spans
+    """Return ``(start, end)`` offsets for every line, end exclusive, terminator included.
+
+    Only ``\n``, ``\r\n`` and ``\r`` end a line (``str.splitlines`` would also split on
+    U+2028, form feeds and other separators, which disagrees with every editor's line count).
+    """
+    return [match.span() for match in _LINE_RE.finditer(text) if match.end() > match.start()]
 
 
 def _is_blank(line: str) -> bool:
@@ -112,9 +116,14 @@ def _split_oversized(text: str, start: int, end: int, max_chars: int) -> list[tu
     while cursor < end:
         window_end = min(cursor + max_chars, end)
         if window_end < end:
-            newline = text.rfind("\n", cursor + max_chars // 2, window_end)
+            floor = cursor + max_chars // 2
+            newline = max(
+                text.rfind("\n", floor, window_end), text.rfind("\r", floor, window_end)
+            )
             if newline != -1:
                 window_end = newline + 1
+            if text[window_end - 1] == "\r" and window_end < end and text[window_end] == "\n":
+                window_end += 1  # never separate the two halves of a CRLF
         pieces.append((cursor, window_end))
         cursor = window_end
     # Merge a tiny trailing piece back into its predecessor.
@@ -126,10 +135,15 @@ def _split_oversized(text: str, start: int, end: int, max_chars: int) -> list[tu
     return pieces
 
 
-def _line_numbers(text: str, character_start: int, character_end: int) -> tuple[int, int]:
-    line_start = text.count("\n", 0, character_start) + 1
-    end_scan = max(character_start, character_end - 1)
-    line_end = text.count("\n", 0, end_scan) + 1
+def _line_numbers(
+    line_starts: list[int], text: str, character_start: int, character_end: int
+) -> tuple[int, int]:
+    """1-based first and last line of ``[start, end)``; a trailing terminator is not a line."""
+    last = character_end - 1
+    while last > character_start and text[last] in "\r\n":
+        last -= 1
+    line_start = bisect.bisect_right(line_starts, character_start)
+    line_end = bisect.bisect_right(line_starts, max(character_start, last))
     return line_start, line_end
 
 
@@ -153,10 +167,11 @@ def split_blocks(
         else:
             spans.extend(_split_oversized(text, start, end, max_block_chars))
 
+    line_starts = [line_start for line_start, _ in _split_lines(text)] or [0]
     blocks: list[TextBlock] = []
     for index, (start, end) in enumerate(spans, start=1):
         chunk = text[start:end]
-        line_start, line_end = _line_numbers(text, start, end)
+        line_start, line_end = _line_numbers(line_starts, text, start, end)
         protected = len(chunk) < min_block_chars
         blocks.append(
             TextBlock(

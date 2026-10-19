@@ -335,7 +335,11 @@ def _rank01(x: list[float]) -> list[float]:
 
 
 def _mechanical(goal: str, texts: Sequence[str]) -> list[tuple[float, bool]]:
-    """LCC's own local pass, called exactly as at training time (default arguments)."""
+    """LCC's own local pass, called exactly as at training time.
+
+    ``fold=False`` keeps the training-time ASCII tokenization: the mechanical pass became
+    accent-insensitive in 1.2, and the model's features must not drift with it.
+    """
     from lcc.relevance.blocks import TextBlock
     from lcc.relevance.compactor import _score_mechanically
 
@@ -353,6 +357,7 @@ def _mechanical(goal: str, texts: Sequence[str]) -> list[tuple[float, bool]]:
             for i, t in enumerate(texts)
         ],
         goal,
+        fold=False,
     )
     return [(res[str(i)][0], res[str(i)][2] is not None) for i in range(len(texts))]
 
@@ -579,17 +584,31 @@ class SpecialistJudge:
         return mask
 
     def score_rows(self, rows: list[list[float]]) -> list[float]:
+        return self._scored(rows)[0]
+
+    def _scored(self, rows: list[list[float]]) -> tuple[list[float], list[bool]]:
         raw = self.raw(rows)
         floor = self._floor(rows)
-        return [
+        scores = [
             raw[i] - self.alpha * rows[i][_LC] + (self.bonus if floor[i] else 0.0)
             for i in range(len(rows))
         ]
+        return scores, floor
 
     def score(self, goal: str, texts: Sequence[str], meta: Sequence[BlockMeta]) -> list[float]:
+        return self.score_and_floor(goal, texts, meta)[0]
+
+    def score_and_floor(
+        self, goal: str, texts: Sequence[str], meta: Sequence[BlockMeta]
+    ) -> tuple[list[float], list[bool]]:
+        """Scores plus the rule-floor mask (best goal match, newest error blocks).
+
+        The compactor never drops a floor block, at any ``specialist_drop_fraction``: the
+        +bonus alone only makes that likely, not certain.
+        """
         if not texts:
-            return []
-        return self.score_rows(featurize(goal, texts, meta))
+            return [], []
+        return self._scored(featurize(goal, texts, meta))
 
 
 @lru_cache(maxsize=1)

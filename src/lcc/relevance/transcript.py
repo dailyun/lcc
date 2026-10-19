@@ -35,7 +35,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from lcc.relevance.jev import JEV_CONTEXT_LIMIT_TOKENS, JevClient, jev_tokens, parse_noul_answer
-from lcc.relevance.transcript_lossless import lossless_decisions, verify_lossless
+from lcc.relevance.transcript_lossless import (
+    duplicate_ids,
+    lossless_decisions,
+    verify_lossless,
+)
 from lcc.relevance.transcript_recoverable import (
     disk_unchanged,
     recoverable_decisions,
@@ -243,6 +247,47 @@ def _blocks(message: dict[str, Any], *keys: str) -> list[dict[str, Any]]:
     return []
 
 
+#: Message fields lcc models. Any other field holding a non-empty list or object (images,
+#: attachments, Anthropic/OpenAI ``content`` blocks) cannot be rebuilt from the parsed
+#: message, so the payload is refused instead of silently losing it -- the same rule the
+#: Claude Code hook applies before calling (``hasUnsupportedContent`` in ``map.mjs``).
+_MESSAGE_KEYS = frozenset(
+    {"role", "text", "toolUses", "toolResults", "tool_calls", "tool_results"}
+)
+
+
+def _refuse_unsupported(index: int, message: dict[str, Any]) -> None:
+    for key, value in message.items():
+        if key in _MESSAGE_KEYS:
+            continue
+        if isinstance(value, (list, dict)) and value:
+            raise TranscriptError(
+                f"message {index} carries unsupported content in {key!r} (images, attachments "
+                "or content blocks); lcc reads 'role', 'text', 'toolUses' and 'toolResults' "
+                "only and would lose it. Convert the message to that shape first."
+            )
+    if (
+        isinstance(message.get("content"), str)
+        and message["content"].strip()
+        and not message.get("text")
+    ):
+        raise TranscriptError(
+            f"message {index} has its text under 'content'; lcc expects it under 'text' "
+            "(Claude Code hook shape) and would otherwise treat the message as empty"
+        )
+
+
+def _require_unicode(index: int, *texts: str) -> None:
+    for text in texts:
+        try:
+            text.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise TranscriptError(
+                f"message {index} contains an unpaired surrogate at offset {exc.start}; "
+                "it is not valid Unicode (decode the transcript as strict UTF-8)"
+            ) from None
+
+
 def parse_transcript(payload: Any) -> list[TranscriptMessage]:
     """Parse a transcript into messages, pairing calls with results by id.
 
@@ -251,9 +296,15 @@ def parse_transcript(payload: Any) -> list[TranscriptMessage]:
     (``toolUses`` / ``toolResults``) or the snake_case equivalents
     (``tool_calls`` / ``tool_results``); a call's id may be ``tool_use_id`` or ``id``.
 
-    Unknown fields are ignored, missing ones become empty. Malformed tool blocks (no id,
-    or an id that is not a string) raise :class:`TranscriptError` rather than being
-    silently dropped: a decision taken over a half-parsed transcript is not auditable.
+    Unknown scalar fields (ids, timestamps, flags) are ignored, missing ones become empty;
+    message order is the array order, never a timestamp. Everything lcc cannot rebuild
+    raises :class:`TranscriptError` rather than being silently dropped, because a decision
+    taken over a half-parsed transcript is not auditable: malformed tool blocks (no id, an id
+    that is not a string, an input that is not an object), unsupported content (images,
+    attachments, ``content`` blocks) and text that is not valid Unicode. Unknown roles are
+    kept as they are; a tool call without a result and a result without a call are carried
+    through untouched. Duplicate ids parse (pairing then takes the last result with that
+    id); :func:`compact_transcript` keeps every call whose id repeats.
     """
     messages: list[TranscriptMessage] = []
     results_by_id: dict[str, ToolResult] = {}
@@ -262,17 +313,25 @@ def parse_transcript(payload: Any) -> list[TranscriptMessage]:
         role = message.get("role")
         if not isinstance(role, str) or not role:
             raise TranscriptError(f"message {index} has no string 'role'")
+        _refuse_unsupported(index, message)
         text = message.get("text", "")
         if text is None:
             text = ""
         if not isinstance(text, str):
             raise TranscriptError(f"message {index} 'text' must be a string")
+        _require_unicode(index, role, text)
 
         results: list[ToolResult] = []
         for raw in _blocks(message, "toolResults", "tool_results"):
             result_id = _call_id(raw)
             if result_id is None:
                 raise TranscriptError(f"message {index} has a tool result without an id")
+            content = raw.get("content")
+            if isinstance(content, (list, dict)) and content and "text" not in raw:
+                raise TranscriptError(
+                    f"message {index} tool result {result_id!r} carries content blocks "
+                    "(e.g. an image) under 'content'; lcc reads a string 'text' only"
+                )
             inner = raw.get("text", "")
             results.append(
                 ToolResult(
@@ -282,6 +341,7 @@ def parse_transcript(payload: Any) -> list[TranscriptMessage]:
                     is_error=raw.get("is_error") is True,
                 )
             )
+            _require_unicode(index, results[-1].text)
             results_by_id[result_id] = results[-1]
 
         calls: list[ToolCall] = []
@@ -291,6 +351,12 @@ def parse_transcript(payload: Any) -> list[TranscriptMessage]:
                 raise TranscriptError(f"message {index} has a tool call without an id")
             tool = raw.get("tool") or raw.get("name") or "tool"
             tool_input = raw.get("input")
+            if tool_input is not None and not isinstance(tool_input, dict):
+                raise TranscriptError(
+                    f"message {index} tool call {call_id!r} has an 'input' that is not an "
+                    f"object ({type(tool_input).__name__}); lcc would lose it"
+                )
+            _require_unicode(index, str(tool), json.dumps(tool_input, default=str))
             calls.append(
                 ToolCall(
                     id=call_id,
@@ -1120,6 +1186,31 @@ def compact_transcript(request: TranscriptCompactionRequest) -> TranscriptCompac
             degraded = True
             provider_used = f"{judge}+partial_fail_safe"
             degradation_reason = f"{judge}_batch_failed"
+
+    # Ids that repeat make pairing ambiguous, and ``_apply`` acts by id: a drop decided for
+    # one call would also remove its namesake, even inside a pinned message. Every provider
+    # keeps them (the lossless/recoverable/stashed modes already did).
+    duplicated = duplicate_ids(messages)
+    # A call whose result sits in a pinned message straddles the recent window: dropping,
+    # trimming or replacing the pair would rewrite that pinned message. It is kept whole
+    # (the recoverable policy already did this; now every provider does).
+    pinned_indices = {message.message_index for message in messages if message.pinned}
+    straddling = {
+        call.id
+        for call in candidates
+        if call.result is not None and call.result.message_index in pinned_indices
+    }
+    forced = dict.fromkeys(straddling, "pinned_recent_result") | dict.fromkeys(
+        duplicated, "duplicate_tool_use_id"
+    )
+    if forced:
+        decisions = [
+            {k: v for k, v in d.items() if k not in _POINTER_FIELDS}
+            | {"decision": "keep", "reason": forced[d["id"]], "chars_after": d["chars"]}
+            if d["id"] in forced and d["decision"] != "keep"
+            else d
+            for d in decisions
+        ]
 
     pinned_decisions = [
         {

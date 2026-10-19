@@ -55,6 +55,69 @@ All notable changes to this project are documented here. The format is based on
 ### Fixed
 
 - `mypy` passes with and without `tiktoken` installed (no unused `type: ignore`).
+### Added
+
+- **Edge-case suite for the deterministic core.** These are property tests over a seeded,
+  stdlib-only hostile corpus (`tests/edge_corpus.py`) and every local scorer. They cover
+  determinism (also across `PYTHONHASHSEED` and locale), verbatim kept bytes, exact report
+  accounting, an honestly stated idempotence property, and never-drop protections at any drop
+  budget. Input, transcript and compaction edge cases are pinned too. Each case, its expected
+  behaviour and its test are listed in `docs/EDGE_CASES.md`.
+- **Judge benchmark: five input/compaction edge cases** (`extra_edge_cases`): an accent-less
+  Portuguese goal, re-reads of different ranges, an error fixed later, parallel tool calls, a
+  CRLF table. They are reported in their own section, so the nine original cases stay
+  comparable. `--check` now also requires rules-lossless to keep their needles and v3-blocks
+  to keep `pt_en_mixed`. `benchmarks/results/judge_bench.*` were not regenerated here.
+
+### Changed
+
+- **Drop markers and trim notes keep the replaced block's line ending.** Before, a marker
+  merged with the next paragraph. When no blank line followed (a code fence right after a
+  paragraph, or a split oversized block), it was glued onto that block's first line and broke
+  the fence. Output bytes after the first mutation change: one line ending per marker or trim.
+- **Mechanical matching is accent-insensitive** (`fold_accents`: NFKD, combining marks
+  dropped). Accented words were split by the ASCII word pattern (`não` became `n` + `o`).
+  Language detection now reads Unicode words and recognises accented Portuguese function
+  words, so Portuguese evidence under an English objective is protected
+  (`evidence_in_pt_not_en`). v3-blocks now keeps the judge-bench `pt_en_mixed` needle (8/9 to
+  9/9 must-keep), with unchanged reduction. specialist-v3 features keep the training-time
+  tokenization (`fold=False`).
+- **specialist-v3 hard floors.** The rule-floor blocks (best goal match, newest error blocks)
+  are never drop candidates (`specialist_floor`). With transcript segments, the latest user
+  message is protected (`latest_user_message`). New `SpecialistJudge.score_and_floor`.
+- **Tool-call mode refuses content it cannot rebuild** and names the field. This covers text
+  under `content`, any non-empty list/object field (images, attachments, content blocks), tool
+  results with `content` blocks, a non-object call `input`, and unpaired surrogates. Before,
+  these parsed as empty and were silently lost from the output.
+- `PROTECTION_VERSION` is `protection-1.2` and `RELATIONSHIP_VERSION` is `relationships-1.1`.
+  The protection and relationship policies changed for non-ASCII text, so sticky decisions
+  start a new cache epoch.
+
+### Fixed
+
+- Boilerplate removal deleted `----`, `Page 3 of 10`, `On … wrote:` and similar lines inside
+  fenced code blocks.
+- Paragraph dedup split fenced code on blank lines, deduplicated inside it, and stripped the
+  leading indentation of every paragraph. NFC and NFD spellings of one paragraph are now
+  exact duplicates, and the first keeps its own bytes.
+- Cleaning replaced input text that happened to contain its internal NUL placeholder with a
+  protected block.
+- A leading BOM hid a first-line code fence from cleaning (the code was whitespace-collapsed)
+  and from block segmentation (fence pairing flipped). Cleaning strips the BOM (`strip_bom`);
+  compaction keeps it.
+- Block line numbers ignored a lone CR, and U+2028 or a form feed counted as a line break. An
+  oversized block could be cut between CR and LF. `BLOCK_ID_RE` rejected ids past block 9999,
+  and restoration ties sorted `blk_10000` before `blk_9999`.
+- Trimmed CRLF markdown tables and logs came back with LF line endings, so the head was no
+  longer the block's own bytes.
+- `semantic_cache_misses` subtracted cache hits twice and went negative on warm runs.
+- Unpaired surrogates crashed `optimize` and `compact_context` deep in hashing. They now raise
+  a `ValueError` that names the offset.
+- Tool-call mode with lossy rules, specialist-v3 or Jev: a drop decided for one call also
+  removed every call sharing its id, even in a pinned message. A call just outside the recent
+  window could be dropped together with its result inside the window. Both are now kept
+  (`duplicate_tool_use_id`, `pinned_recent_result`), as the lossless and recoverable modes
+  already did.
 
 ## [1.2.0] - 2026-10-19
 

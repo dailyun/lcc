@@ -32,12 +32,14 @@ import os
 import re
 import threading
 import time
+import unicodedata
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from lcc.cleaning.normalize import require_valid_unicode
 from lcc.relevance.blocks import (
     DEFAULT_MAX_BLOCK_CHARS,
     DEFAULT_MIN_BLOCK_CHARS,
@@ -372,9 +374,24 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _lexical_terms(text: str) -> set[str]:
+def fold_accents(text: str) -> str:
+    """Lowercase ``text`` with diacritics removed (``Configuração`` -> ``configuracao``).
+
+    Deterministic and locale-independent (Unicode NFKD, then combining marks dropped). Used
+    so lexical matching is accent-insensitive: a Portuguese objective typed without accents
+    still matches the accented source, and an accented word is one term instead of being
+    shredded by the ASCII word pattern (``não`` used to become ``n`` + ``o``). Comparison
+    only: emitted bytes never change.
+    """
+    decomposed = unicodedata.normalize("NFKD", text.lower())
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
+def _lexical_terms(text: str, *, fold: bool = True) -> set[str]:
+    """Content terms of ``text``. ``fold=False`` is the pre-1.2 ASCII-only tokenization, kept
+    for ``specialist-v3`` features, which were computed that way at training time."""
     terms: set[str] = set()
-    for match in _WORD_RE.finditer(text.lower()):
+    for match in _WORD_RE.finditer(fold_accents(text) if fold else text.lower()):
         term = match.group(0).strip("'")
         if len(term) >= 3 and term not in _STOPWORDS:
             terms.add(term)
@@ -444,9 +461,13 @@ def _classify_instruction_block(text: str) -> str | None:
 _LANGUAGE_MARKERS: dict[str, frozenset[str]] = {
     "pt": frozenset(
         {
-            "nao", "são", "sao", "cerca", "porque", "tambem", "também", "muito", "qual",
+            "nao", "não", "são", "sao", "cerca", "porque", "tambem", "também", "muito", "qual",
             "quando", "onde", "entre", "sobre", "ainda", "depois", "cada", "pode", "ser",
             "estar",
+            # Accented function words: unambiguous among the languages listed here. They
+            # never matched before 1.2 because the ASCII word pattern split them.
+            "é", "em", "até", "você", "voce", "uma", "às", "pelo", "pela", "pelos", "pelas",
+            "isso", "isto", "exceto", "estão", "nós", "num", "numa",
         }
     ),
     "es": frozenset(
@@ -461,13 +482,17 @@ _LANGUAGE_MARKERS: dict[str, frozenset[str]] = {
 }
 
 
+_LANGUAGE_WORD_RE = re.compile(r"[^\W\d_]+|\d+")
+
+
 def _detect_language(text: str) -> str | None:
     """Best-effort language tag from unambiguous function words; ``None`` when unsure.
 
     Only a clear signal counts, so English text and short blocks stay ``None`` rather than
     being guessed at.
     """
-    words = [w.lower() for w in _WORD_RE.findall(text)]
+    # Unicode letters, so accented markers ("é", "não", "über") can match at all.
+    words = [w.lower() for w in _LANGUAGE_WORD_RE.findall(text)]
     if len(words) < 12:
         return None
     hits: dict[str, int] = {}
@@ -509,7 +534,7 @@ _SUPERSESSION_CUE_RE = re.compile(r"\b(?:" + SUPERSESSION_CUES + r")\b", re.IGNO
 
 
 def _distinctive_terms(
-    blocks: list[TextBlock], question_terms: set[str]
+    blocks: list[TextBlock], question_terms: set[str], *, fold: bool = True
 ) -> dict[str, set[str]]:
     """Map each distinctive term to the ids of blocks containing it.
 
@@ -521,7 +546,7 @@ def _distinctive_terms(
     ceiling = max(2, len(blocks) // 2)
     occurrences: dict[str, set[str]] = {}
     for block in blocks:
-        for term in _lexical_terms(block.text):
+        for term in _lexical_terms(block.text, fold=fold):
             if len(term) < _DISTINCTIVE_MIN_TERM_CHARS or term in question_terms:
                 continue
             occurrences.setdefault(term, set()).add(block.id)
@@ -534,6 +559,8 @@ def _dependency_closures(
     question_terms: set[str],
     min_shared_terms: int = 2,
     max_hops: int = 1,
+    *,
+    fold: bool = True,
 ) -> dict[str, str]:
     """Blocks pulled in because they share distinctive vocabulary with a kept block.
 
@@ -546,7 +573,7 @@ def _dependency_closures(
     the trap blocks come along too, and it cost roughly twenty points of mean reduction for no
     additional case passing. One hop is the default for that reason.
     """
-    distinctive = _distinctive_terms(blocks, question_terms)
+    distinctive = _distinctive_terms(blocks, question_terms, fold=fold)
     terms_for: dict[str, set[str]] = {}
     for term, ids in distinctive.items():
         for block_id in ids:
@@ -679,6 +706,14 @@ def _score_bucket(score: float) -> float:
     return int(score * 10 + 0.5) / 10.0
 
 
+def _line_ending(text: str) -> str:
+    """The line terminator ``text`` ends with (``\r\n``, ``\n``, ``\r``), or ``""``."""
+    for ending in ("\r\n", "\n", "\r"):
+        if text.endswith(ending):
+            return ending
+    return ""
+
+
 def _render_trimmed(
     block_text: str,
     score: float | None,
@@ -704,10 +739,13 @@ def _render_trimmed(
             score_part = f", score {display_score:.2f} in band {trim_threshold:.2f}-{threshold:.2f}"
         else:
             score_part = f", score {display_score:.2f}"
+    # The note ends with the block's own line ending, so whatever follows the block (the
+    # next paragraph, or a code fence with no blank line before it) still starts on its own
+    # line and keeps its paragraph boundary.
     return (
         f"{head.rstrip()}\n"
         f"[lcc-compact: trimmed {len(block_text) - len(head)} of {len(block_text)} chars "
-        f"of this block{score_part}]"
+        f"of this block{score_part}]{_line_ending(block_text)}"
     )
 
 
@@ -801,6 +839,10 @@ def _assemble_compacted(
                             run, request.threshold, include_scores=request.marker_scores
                         )
                     )
+                    # Keep the dropped run's own line ending: without it the marker and the
+                    # next kept block merge into one paragraph, or the marker is glued onto
+                    # the first line of a following code fence.
+                    pieces.append(_line_ending(by_id[run[-1].id].text))
             else:
                 pieces.append(gaps[ordered_decision.index - 1])
                 if ordered_decision.decision == "trim":
@@ -827,6 +869,14 @@ def _assemble_compacted(
     return compacted, dropped_ids, trimmed_ids, mutated_ids, first_mutation_offset
 
 
+def _block_order(block_id: str) -> tuple[int, str]:
+    """Sort key: source order for ``blk_NNNN_<hash>`` ids (numeric past 9999), then the id."""
+    parts = block_id.split("_")
+    if len(parts) == 3 and parts[0] == "blk" and parts[1].isdigit():
+        return int(parts[1]), block_id
+    return -1, block_id
+
+
 def _restoration_rank(
     graph: Any,
     candidate_ids: list[str],
@@ -836,10 +886,10 @@ def _restoration_rank(
 
     Score = edge_count + Σconfidence + risk bonus (QUALIFIES/CONTRADICTS/
     SUPERSEDES/DEPENDS_ON weigh more) + kept dependents. Deterministic
-    tie-break by block id so identical runs emit identical bytes.
+    tie-break by source order (then id) so identical runs emit identical bytes.
     """
     if graph is None:
-        return sorted(candidate_ids)
+        return sorted(candidate_ids, key=_block_order)
 
     def _score(bid: str) -> float:
         edges = graph.edges_touching(bid)
@@ -860,7 +910,7 @@ def _restoration_rank(
                 score += 0.5
         return score
 
-    return sorted(candidate_ids, key=lambda b: (-_score(b), b))
+    return sorted(candidate_ids, key=lambda b: (-_score(b), *_block_order(b)))
 
 
 def _batch_blocks(
@@ -1124,6 +1174,7 @@ def _score_mechanically(
     *,
     protect: bool = True,
     question_language: str | None = None,
+    fold: bool = True,
 ) -> dict[str, tuple[float, str, str | None]]:
     """Local fallback: drop only blocks with zero lexical overlap with the objective.
 
@@ -1132,13 +1183,13 @@ def _score_mechanically(
     and why the block survived anyway. A non-``None`` reason means the deterministic safety net
     kept it; the caller turns that into a keep decision.
     """
-    question_terms = _lexical_terms(question)
+    question_terms = _lexical_terms(question, fold=fold)
     if not question_terms:
         # No objective terms: nothing can be judged irrelevant locally; keep everything.
         return {block.id: (1.0, "mechanical", None) for block in blocks}
     results: dict[str, tuple[float, str, str | None]] = {}
     for block in blocks:
-        overlap = question_terms & _lexical_terms(block.text)
+        overlap = question_terms & _lexical_terms(block.text, fold=fold)
         denominator = max(1, min(6, len(question_terms)))
         score = round(min(1.0, len(overlap) / denominator), 2)
         reason = _deterministic_protection(block.text, question_language) if protect else None
@@ -1151,7 +1202,9 @@ def _score_mechanically(
             for block_id, (score, _, reason) in results.items()
             if score > 0.0 or reason is not None
         }
-        for block_id, reason in _dependency_closures(blocks, kept, question_terms).items():
+        for block_id, reason in _dependency_closures(
+            blocks, kept, question_terms, fold=fold
+        ).items():
             score, source, existing = results[block_id]
             if existing is None:
                 results[block_id] = (score, source, reason)
@@ -1218,6 +1271,8 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
     text = request.text
     if not request.question.strip():
         raise ValueError("relevance compaction requires a non-empty objective (--question)")
+    require_valid_unicode(text, "context text")
+    require_valid_unicode(request.question, "objective")
     blocks = split_blocks(
         text,
         min_block_chars=request.min_block_chars,
@@ -1263,6 +1318,21 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
     if request.preserve_tail_blocks > 0:
         for block in blocks[-request.preserve_tail_blocks :]:
             protected_reasons.setdefault(block.id, "tail_preserve")
+
+    # --- transcripts: the latest user message is the task; it is never a drop candidate.
+    if request.segments:
+        latest_user = max(
+            (s for s in request.segments if s.role == "user" and s.kind == "text"),
+            key=lambda s: s.character_start,
+            default=None,
+        )
+        if latest_user is not None:
+            for block in blocks:
+                if (
+                    block.character_start < latest_user.character_end
+                    and block.character_end > latest_user.character_start
+                ):
+                    protected_reasons.setdefault(block.id, "latest_user_message")
 
     # --- middle gear resolution: trim band [trim_threshold, threshold)
     if request.trim_head_chars <= 0:
@@ -1705,10 +1775,17 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
                     [(block.character_start, block.character_end) for block in blocks],
                     request.segments,
                 )
-                raw = specialist_judge.score(
-                    request.question, [block.text for block in blocks], meta
-                )
+                texts = [block.text for block in blocks]
+                score_and_floor = getattr(specialist_judge, "score_and_floor", None)
+                if callable(score_and_floor):
+                    raw, floor = score_and_floor(request.question, texts, meta)
+                else:  # an injected judge without the floor mask
+                    raw = specialist_judge.score(request.question, texts, meta)
+                    floor = [False] * len(blocks)
                 raw_by_id = {block.id: value for block, value in zip(blocks, raw, strict=True)}
+                floor_ids = {
+                    block.id for block, flagged in zip(blocks, floor, strict=True) if flagged
+                }
             except Exception as exc:  # a ranker failure must never break compaction
                 LOGGER.warning("specialist-v3 ranking failed, using mechanical scoring: %r", exc)
                 provider_used = "specialist-v3+mechanical_fallback"
@@ -1734,6 +1811,11 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
                     )
                     for block in pending
                 }
+                # The rule floor (best goal match, newest error blocks) is a hard keep: its
+                # score bonus alone does not survive a large drop fraction.
+                for block in pending:
+                    if block.id in floor_ids and guarded[block.id] is None:
+                        guarded[block.id] = "specialist_floor"
                 specialist_drop = _specialist_drop_texts(
                     pending, raw_by_id, guarded, request.specialist_drop_fraction
                 )
@@ -2029,7 +2111,7 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
             # Restore critical blocks, highest semantic risk first, within budget.
             # Score = edge_count + Σconfidence + risk bonus (QUALIFIES/CONTRADICTS/
             # SUPERSEDES/DEPENDS_ON weigh more) + kept dependents. Deterministic
-            # tie-break by block id so identical runs emit identical bytes.
+            # tie-break by source order so identical runs emit identical bytes.
             restorable = [
                 bid
                 for bid in verdict.critical_dropped_blocks
@@ -2487,7 +2569,8 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
         relationship_edges=relationship_edges,
         semantic_decisions=calls,
         semantic_cache_hits=reused,
-        semantic_cache_misses=len(pending) - reused if pending else 0,
+        # ``pending`` already excludes reused blocks: every pending block was a cache miss.
+        semantic_cache_misses=len(pending),
         marker_tokens=_marker_tokens(compacted, request.model),
         policy_version=POLICY_VERSION,
         trim_policy_version=TRIM_POLICY_VERSION,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from lcc.cleaning.normalize import _extract_protected_regions
+from lcc.cleaning.normalize import _extract_protected_regions, placeholder_prefix
 from lcc.schemas import CleaningStep
 
 # Whisper / STT Audio event annotations
@@ -228,6 +228,7 @@ def clean_speech_transcript(text: str) -> str:
     # Step 2: Mask protected regions (fenced code blocks and tables)
     raw_lines = normalized.split("\n")
     all_ranges, blocks = _extract_protected_regions(raw_lines)
+    prefix = placeholder_prefix(normalized)
     range_map: dict[int, tuple[int, int]] = {}
     for block_idx, (start, end) in enumerate(all_ranges):
         range_map[start] = (end, block_idx)
@@ -242,7 +243,7 @@ def clean_speech_transcript(text: str) -> str:
     while line_idx < n:
         if line_idx in range_map:
             end, block_idx = range_map[line_idx]
-            processed_lines.append(f"\x00__LCC_PROTECTED_BLOCK_{block_idx}__\x00")
+            processed_lines.append(f"{prefix}{block_idx}__\x00")
             last_speaker = None
             line_idx = end + 1
             continue
@@ -308,6 +309,6 @@ def clean_speech_transcript(text: str) -> str:
     joined = re.sub(r"\n{3,}", "\n\n", joined).strip("\n")
 
     for block_idx, block in enumerate(blocks):
-        joined = joined.replace(f"\x00__LCC_PROTECTED_BLOCK_{block_idx}__\x00", block)
+        joined = joined.replace(f"{prefix}{block_idx}__\x00", block)
 
     return joined

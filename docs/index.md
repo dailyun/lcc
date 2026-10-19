@@ -46,6 +46,7 @@ MCP (Claude Code, Cursor, Claude Desktop):
 - [MCP server](MCP.md): the six tools
 - [ChatGPT plugin](CHATGPT_PLUGIN.md) and [privacy policy](PRIVACY_POLICY.md)
 - [Architecture](architecture.md) and [roadmap](roadmap.md)
+- [Edge cases](EDGE_CASES.md): hostile input and compaction corner cases, and the tests that pin them
 
 Source, issues and releases: [github.com/lucasmartins-ai/lcc](https://github.com/lucasmartins-ai/lcc).
 Maintained by [LookADev](https://lookadev.com).

@@ -37,7 +37,12 @@ removed or trimmed — so a caller can map it back onto its own session. Message
 all of their content are dropped; results stay in the message they arrived in.
 
 Malformed input fails loudly (exit 2): a decision taken over a half-parsed transcript is not
-auditable. A call without a result yet is left alone — there is nothing to judge.
+auditable. That includes content lcc cannot rebuild: text under `content` instead of `text`,
+any other field holding a non-empty list or object (images, attachments, content blocks), a
+tool result whose content blocks sit under `content`, a call `input` that is not an object, and
+text that is not valid Unicode. Each error names the field. A call without a result yet, and a
+result without a call, are left alone; there is nothing to judge. Calls whose id repeats are
+always kept (`duplicate_tool_use_id`). Every case and its test: [EDGE_CASES.md](EDGE_CASES.md).
 
 ## 2. Decisions
 
@@ -58,8 +63,10 @@ call, and a call is never dropped without its result.
 
 The first message and the newest `--preserve-recent` messages (default 6) are pinned: their
 calls are not scored and not mutated, and they appear in the report as `source: pin` with
-reason `pinned_first_message` / `pinned_recent`. Pinning is the honest way to protect a live
-turn: the objective and the tool you just ran are usually the ones that matter most.
+reason `pinned_first_message` / `pinned_recent`. A call just outside the window whose result
+is inside it is kept whole too (`pinned_recent_result`), so a pinned message never changes.
+Pinning is the honest way to protect a live turn: the objective and the tool you just ran are
+usually the ones that matter most.
 
 ## 4. Budgets and fitting
 

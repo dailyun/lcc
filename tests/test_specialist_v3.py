@@ -175,6 +175,7 @@ def test_ranker_failure_falls_back_to_mechanical(monkeypatch):
         raise RuntimeError("synthetic failure")
 
     monkeypatch.setattr(sp.SpecialistJudge, "score", boom)
+    monkeypatch.setattr(sp.SpecialistJudge, "score_and_floor", boom)
     text, segments = _rendered(3, 3)
     report = compact_context(
         RelevanceCompactionRequest(

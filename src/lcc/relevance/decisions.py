@@ -46,8 +46,8 @@ DECISIONS_CACHE_SCHEMA_VERSION = "relevance-decisions-1.1"
 #: component participates in the v1.2 cache key so a logic change is a cache epoch.
 POLICY_VERSION = "relevance-compaction-1.2"
 BLOCK_PARSER_VERSION = "blocks-1.0"
-PROTECTION_VERSION = "protection-1.1"
-RELATIONSHIP_VERSION = "relationships-1.0"
+PROTECTION_VERSION = "protection-1.2"
+RELATIONSHIP_VERSION = "relationships-1.1"
 # NOTE: TRIM_POLICY_VERSION lives in lcc.relevance.trim (single source of truth) and is
 # re-exported here so identity builders do not need a second import.
 
