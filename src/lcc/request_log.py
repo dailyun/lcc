@@ -48,6 +48,13 @@ RULES: tuple[tuple[str, str], ...] = (
     ("<TOKEN>", r"(?i)\bauthorization\s*:\s*(?:(?:basic|bearer|digest|token)\s+)?\S+"),
     ("<TOKEN>", r"(?i)\bbearer\s+\S+"),
     ("<TOKEN>", r"\beyJ[\w-]+\.[\w-]+\.[\w-]+"),
+    ("<TOKEN>", r"(?i)\b(?:set-)?cookie\s*:\s*\S+"),
+    # NAME_API_KEY=..., client_secret: ...: the secret word glued to a longer identifier.
+    (
+        "<TOKEN>",
+        r"(?i)\b[\w-]*(?:api[_-]?key|access[_-]?key|token|secret|password|passwd)[\w-]*"
+        r"\s*[:=]\s*\S+",
+    ),
     (
         "<TOKEN>",
         r"(?i)\b(?:api[_-]?key|access[_-]?key|token|secret|password|passwd|pwd|senha|chave)"
@@ -268,7 +275,11 @@ def log_request(
             "language": language,
             "session": session_hash(key, _salt(directory)),
             "tool": tool,
-            "field": redact(field) if isinstance(field, str) and field.strip() else "none",
+            "field": (
+                redact(field.strip()[:MAX_GOAL_CHARS])
+                if isinstance(field, str) and field.strip()
+                else "none"
+            ),
             "lcc_version": __version__,
             "redaction_ruleset_sha256": RULESET_SHA256,
         }

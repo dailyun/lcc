@@ -74,7 +74,7 @@ lcc compact transcript.json -q "finish the parser fix" --mode tool-calls \
 | Provider | Runs | When it is used | Report says |
 | --- | --- | --- | --- |
 | `specialist-v3` | local, CPU | default (`auto`) whenever transcript blocks are present: the Claude Code hook, `compact_transcript`, `--mode tool-calls` | `semantic_guarantee: none` (a rank, not a judgment) |
-| `mechanical` | local, CPU | `--provider mechanical`; plain text under `auto` when no TypeSafe key is configured | `semantic_guarantee: none` |
+| `mechanical` | local, CPU | `--provider mechanical`; plain text under `auto` (a configured TypeSafe key does not change that unless `LCC_AUTO_REMOTE=1`) | `semantic_guarantee: none` |
 | `rules` (`lossless`, `recoverable`, `stashed`) | local, no model | `provider: rules` for transcripts | `lossless`: only provable duplicates removed; `recoverable`: also outputs that can be re-read; `stashed` (recommended): removed outputs stay byte-recoverable through `recall` |
 | `jev` | remote (TypeSafe API) | opt-in: `--provider jev` / `provider: jev`, needs `TYPESAFE_API_KEY` | semantic judgment or explicit degradation |
 | `laya` | local model | deprecated; runs only when named | named model and fallback state |
@@ -82,7 +82,9 @@ lcc compact transcript.json -q "finish the parser fix" --mode tool-calls \
 `specialist-v3` details and limits: [SPECIALIST.md](docs/SPECIALIST.md). Rules modes:
 [TOOL_CALLS.md](docs/TOOL_CALLS.md). Jev is an optional path you name explicitly
 (`--provider jev`); it sends the objective and context blocks to the TypeSafe API, and
-`LCC_DISABLE_NETWORK=1` disables it. `compact` writes a `relevance-compaction-1.2` report;
+`LCC_DISABLE_NETWORK=1` disables it. `auto` never picks it on its own: having a key is not
+consent to send context off-machine, so plain text under `auto` stays on `mechanical` unless
+you set `LCC_AUTO_REMOTE=1`. `compact` writes a `relevance-compaction-1.2` report;
 check `provider_used` and `degraded` before trusting the output.
 
 ## Benchmarks

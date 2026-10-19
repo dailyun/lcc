@@ -28,6 +28,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import re
 import threading
 import time
@@ -604,6 +605,19 @@ def _clip_for_scoring(text: str, limit: int = _SCORE_CLIP_HEAD + _SCORE_CLIP_TAI
     return (
         f"{text[:_SCORE_CLIP_HEAD]}\n"
         f"…[lcc-compact: {removed} chars clipped for scoring]…\n{tail}"
+    )
+
+
+#: Opt-in for plain-text ``provider="auto"`` to reach the remote Jev judge. Without it
+#: ``auto`` never leaves the machine, even when a TypeSafe key is configured: a key in the
+#: environment, a key file or the macOS Keychain is not consent to send context off-machine.
+AUTO_REMOTE_ENV = "LCC_AUTO_REMOTE"
+
+
+def auto_remote_enabled() -> bool:
+    """``auto`` may resolve the remote Jev judge (``LCC_AUTO_REMOTE=1``, network allowed)."""
+    return (
+        os.environ.get(AUTO_REMOTE_ENV) == "1" and os.environ.get("LCC_DISABLE_NETWORK") != "1"
     )
 
 
@@ -1461,8 +1475,28 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
             specialist_fallback_to_mechanical = True
             degradation_reason = "specialist_v3_unavailable_mechanical_fallback"
     elif provider_requested in ("auto", "jev"):
-        client = request.client if request.client is not None else _resolve_client()
-        if client is None:
+        # Remote only when named: "jev", or "auto" with the LCC_AUTO_REMOTE=1 opt-in. An
+        # injected client is the caller's explicit choice and is always used.
+        auto_local = (
+            provider_requested == "auto" and request.client is None and not auto_remote_enabled()
+        )
+        client = (
+            request.client
+            if request.client is not None
+            else None
+            if auto_local
+            else _resolve_client()
+        )
+        if client is None and auto_local:
+            degraded = True
+            semantic_guarantee = "none"
+            degradation_reason = "jev_unavailable_mechanical_fallback"
+            warnings.append(
+                "auto_local_only: 'auto' scored plain text with the local mechanical scorer; "
+                f"no text left this machine. Name provider 'jev' (or set {AUTO_REMOTE_ENV}=1) "
+                "to use the remote TypeSafe judge (degraded)"
+            )
+        elif client is None:
             if provider_requested == "jev":
                 degraded = True
                 provider_used = "degraded"

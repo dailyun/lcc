@@ -709,7 +709,7 @@ def serve_forever() -> None:
             message, ndjson = _read_message(stdin)
         except OSError:
             break
-        except ValueError:  # JSONDecodeError / UnicodeDecodeError: answer and keep serving
+        except (ValueError, RecursionError):  # bad or too-deeply-nested JSON: answer, keep serving
             response: dict[str, Any] | None = _error(None, -32700, "parse error")
         else:
             if message is None:

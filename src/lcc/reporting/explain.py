@@ -10,7 +10,22 @@ source file, so a reviewer can audit a pass after the fact.
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+#: C0 controls except tab/newline, DEL, and C1 controls (incl. the 8-bit CSI ``\x9b``).
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def terminal_safe(text: str) -> str:
+    """Escape control characters so untrusted report or source text cannot drive a terminal.
+
+    A report or ``--source`` file can carry tool output from anywhere (web pages, logs); an
+    ANSI/OSC escape in it would otherwise recolour, hide or rewrite what ``lcc explain``
+    prints, or set the terminal title/clipboard. Escapes become visible ``\\x1b`` text.
+    """
+    return _CONTROL.sub(lambda match: f"\\x{ord(match.group()):02x}", text)
+
 
 #: Reason code to plain-language explanation. Keys are exact codes; ``DYNAMIC_REASONS`` covers
 #: the codes that carry a payload after a prefix.

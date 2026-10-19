@@ -108,7 +108,7 @@ _FILLERS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(?i),\s*ou\s+seja\s*,\s*"), " "),
     (re.compile(r"(?i),\s*n[eé]\?"), "."),
     (re.compile(r"(?i),\s*n[eé]\s*,\s*"), " "),
-    (re.compile(r"(?i)\s+n[eé]\?"), "."),
+    (re.compile(r"(?i)(?<!\s)\s+n[eé]\?"), "."),  # lookbehind: linear on long blank runs
     (re.compile(r"(?i)\b[eé]\.\.\.\s*"), ""),
     (re.compile(r"(?i)\beh\.\.\.\s*"), ""),
     (re.compile(r"(?i)\b[eé]ee+\b\s*"), ""),

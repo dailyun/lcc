@@ -10,3 +10,8 @@ build
 *.egg-info
 eval/reports/*.json
 eval/reports/*.md
+.env
+.env.*
+!.env.example
+*.key
+.lcc
