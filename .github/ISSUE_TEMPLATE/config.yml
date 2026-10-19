@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/lucasmartins-ai/lcc/discussions
+    about: Ask how to use lcc or discuss an idea before opening an issue.
+  - name: Report a security vulnerability
+    url: https://github.com/lucasmartins-ai/lcc/security/policy
+    about: Do not open a public issue for security problems; follow the security policy.

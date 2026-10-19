@@ -1,0 +1,29 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.lucasmartins-ai/lcc",
+  "title": "lcc (Local Context Compiler)",
+  "description": "Local context compaction for agents: drops spent tool output, keeps the rest verbatim.",
+  "repository": {
+    "url": "https://github.com/lucasmartins-ai/lcc",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/lucasmartins-ai/lcc",
+  "version": "1.2.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "local-context-compiler",
+      "version": "1.2.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp",
+          "description": "Run the stdio MCP server (lcc mcp)."
+        }
+      ]
+    }
+  ]
+}
