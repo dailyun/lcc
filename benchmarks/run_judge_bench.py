@@ -19,7 +19,10 @@ Inputs: nine edge cases written for this file (supersession, contradiction, conf
 exception rule, pt/en mixed, prompt injection in a tool output, a large git diff, an old root
 cause, an identical re-read), each padded with the seeded transcripts from
 ``tests/specialist_synthetic.py``; plus two of those transcripts alone (about 300 and 1,100
-blocks) for latency. Everything is synthetic; no session text.
+blocks) for latency. Five input/compaction edge cases (``extra_edge_cases``: accent-less
+Portuguese goal, re-reads of different ranges, an error fixed later, parallel tool calls, a
+CRLF table) run in the full pass only and are reported in their own section. Everything is
+synthetic; no session text.
 
     python benchmarks/run_judge_bench.py            # writes benchmarks/results/judge_bench.*
     python benchmarks/run_judge_bench.py --check    # exit 1 on a crash or a regression floor
@@ -246,6 +249,105 @@ def edge_cases() -> list[dict[str, Any]]:
     return out
 
 
+def _crlf_table() -> str:
+    rows = [f"| region-{i:02d} | {10 + i} |" for i in range(40)]
+    rows.insert(23, "| eu-west-1 | 42 |")
+    return "\r\n".join(["| region | quota |", "|---|---|", *rows]) + "\r\n"
+
+
+def extra_edge_cases() -> list[dict[str, Any]]:
+    """Input and compaction edge cases (docs/EDGE_CASES.md), reported in their own section so
+    the nine cases above stay comparable with earlier runs. Same format and padding."""
+    global _ids
+    _ids = iter(range(5_000, 10_000))
+    parallel_uses = [
+        {"tool_use_id": f"toolu_par_{i}", "tool": "Read", "input": {"file_path": f"svc/{name}.py"}}
+        for i, name in enumerate(("auth", "billing", "quota", "audit"))
+    ]
+    parallel_results = [
+        {"tool_use_id": f"toolu_par_{i}", "text": body}
+        for i, body in (
+            (2, "QUOTA_WINDOW_S = 3600\n" + _filler_code("quota_helper", 25)),
+            (0, _filler_code("auth_helper", 25)),
+            (3, _filler_code("audit_helper", 25)),
+            (1, _filler_code("billing_helper", 25)),
+        )
+    ]
+    cases = [
+        (
+            "pt_accentless_goal",
+            "qual e o limite de upload das contas gratuitas?",
+            _call(
+                "WebFetch",
+                {"url": "https://example.com/limites"},
+                "Limites da plataforma\n\nO limite de upload é 25 MB por arquivo, "
+                "exceto para contas gratuitas, que ficam em 10 MB por arquivo enviado.\n\n"
+                + "Shipping and returns are handled by the partner warehouse team. " * 12,
+            ),
+            ["contas gratuitas, que ficam em 10 MB"],
+        ),
+        (
+            "partial_reread_ranges",
+            "What does parse_header return for an empty frame?",
+            _call(
+                "Read",
+                {"file_path": "src/wire/frame.py", "offset": 0, "limit": 60},
+                "def parse_header(frame):\n    if not frame:\n        return HEADER_EMPTY\n"
+                + _filler_code("frame_helper", 20),
+            )
+            + _call(
+                "Read",
+                {"file_path": "src/wire/frame.py", "offset": 200, "limit": 60},
+                _filler_code("frame_tail", 20),
+            ),
+            ["return HEADER_EMPTY"],
+        ),
+        (
+            "fixed_error_old_root_cause",
+            "Why did the tenant import test fail before the fix?",
+            _call(
+                "Bash",
+                {"command": "pytest -q tests/test_tenant_import.py"},
+                "F\nFAILED tests/test_tenant_import.py::test_load - KeyError: 'tenant_id'\n1 failed",
+            )
+            + _call(
+                "Edit",
+                {"file_path": "jobs/tenant_import.py", "old_string": "row['tenant_id']",
+                 "new_string": "row.get('tenant_id')"},
+                "The file jobs/tenant_import.py has been updated.",
+            )
+            + _call("Bash", {"command": "pytest -q tests/test_tenant_import.py"}, ".\n1 passed"),
+            ["KeyError: 'tenant_id'"],
+        ),
+        (
+            "parallel_tool_calls",
+            "How long is the quota window?",
+            [
+                {"role": "assistant", "text": "Reading the four services.",
+                 "toolUses": parallel_uses},
+                {"role": "user", "text": "", "toolResults": parallel_results},
+            ],
+            ["QUOTA_WINDOW_S = 3600"],
+        ),
+        (
+            "crlf_table_output",
+            "What quota does eu-west-1 have?",
+            _call("Bash", {"command": "quota-report --format md"}, _crlf_table()),
+            ["| eu-west-1 | 42 |"],
+        ),
+    ]
+    out = []
+    for k, (cid, goal, msgs, needles) in enumerate(cases):
+        payload = (
+            synthetic_payload(seed=120 + k, turns=4)
+            + msgs
+            + synthetic_payload(seed=160 + k, turns=3)
+            + [{"role": "user", "text": goal}]
+        )
+        out.append({"id": cid, "goal": goal, "payload": payload, "needles": needles})
+    return out
+
+
 def fixture_inputs() -> list[dict[str, Any]]:
     """The seeded transcripts from the specialist-v3 latency bench (held-out median / largest size)."""
     return [
@@ -382,6 +484,10 @@ def pass_worker(name: str, repeats: int) -> dict[str, Any]:
         a, _ = _tokens(out)
         before, after = before + b, after + a
         per_case[case["id"]] = {"needles_kept": hits, "tokens_before": b, "tokens_after": a}
+    extra = {}
+    for case in extra_edge_cases():
+        out = _run_pass(name, case["goal"], case["payload"])
+        extra[case["id"]] = sum(n in out for n in case["needles"])
     fixtures = {}
     for fx in fixture_inputs():
         original = render_transcript(parse_transcript(fx["payload"]))[0]
@@ -407,6 +513,9 @@ def pass_worker(name: str, repeats: int) -> dict[str, Any]:
         "fixtures": fixtures,
         "peak_rss_mb": round(rss / (2**20 if sys.platform == "darwin" else 2**10), 1),
         "per_case": per_case,
+        "extra_per_case": extra,
+        "extra_must_keep_kept": sum(extra.values()),
+        "extra_must_keep_total": sum(len(c["needles"]) for c in extra_edge_cases()),
     }
 
 
@@ -484,6 +593,24 @@ def markdown(res: dict[str, Any]) -> str:
             f"| {p['fixtures'][small]['token_reduction']:.1%} | {p['edge_ms_median']:.0f} / {p['edge_ms_p90']:.0f} "
             f"| {p['fixtures'][small]['median_ms']:.0f} | {p['fixtures'][big]['median_ms']:.0f} | {p['peak_rss_mb']} |"
         )
+    extra_ids = [c["id"] for c in extra_edge_cases()]
+    lines += [
+        "",
+        f"## Input and compaction edge cases ({len(extra_ids)} cases, full pass)",
+        "",
+        "Same format, reported apart so the table above stays comparable with earlier runs "
+        "(see docs/EDGE_CASES.md). 1 = the must-keep needle survived.",
+        "",
+        "| pass | kept | " + " | ".join(extra_ids) + " |",
+        "| --- | ---: | " + " | ".join("---:" for _ in extra_ids) + " |",
+    ]
+    for name in PASSES:
+        p = res["passes"][name]
+        lines.append(
+            f"| {name} | {p['extra_must_keep_kept']}/{p['extra_must_keep_total']} | "
+            + " | ".join(str(p["extra_per_case"][cid]) for cid in extra_ids)
+            + " |"
+        )
     lines += [
         "",
         f"Token counts: `{res['passes'][PASSES[0]]['token_count_method']}`. "
@@ -544,6 +671,11 @@ def main(argv: list[str] | None = None) -> int:
     lossless = res["passes"]["rules-lossless"]
     if lossless["must_keep_kept"] != lossless["must_keep_total"]:
         bad.append("rules-lossless lost a must-keep needle")
+    if lossless["extra_must_keep_kept"] != lossless["extra_must_keep_total"]:
+        bad.append("rules-lossless lost an edge-case needle")
+    # Deterministic language protection keeps Portuguese evidence under an English goal.
+    if res["passes"]["v3-blocks"]["per_case"]["pt_en_mixed"]["needles_kept"] != 1:
+        bad.append("v3-blocks lost the pt_en_mixed needle")
     if bad:
         print(f"regression: {bad}", file=sys.stderr)
         return 1
