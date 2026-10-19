@@ -39,6 +39,7 @@ MCP (Claude Code, Cursor, Claude Desktop):
 ## Guides
 
 - [Quickstart](QUICKSTART.md): every command, offline
+- [Share your numbers](SHARE_STATS.md): anonymous `lcc share-stats` summary for beta testers
 - [Claude Code plugin](CLAUDE_CODE.md): verbatim `/compact` instead of a lossy summary
 - [Tool-call mode](TOOL_CALLS.md): compacting agent transcripts
 - [Specialist v3](SPECIALIST.md): offline block ranker for structured transcripts

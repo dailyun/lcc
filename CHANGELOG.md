@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **`lcc share-stats`: anonymous "share your numbers" summary for beta testers.** Reads local
+  `lcc compact -r` reports and the opt-in request log (`LCC_REQUEST_LOG=1`) and prints Markdown
+  (default) or `--json` (`lcc-share-stats-1.0`) to paste into a "Share your results" issue:
+  pass and provider/mode counts, degraded/fallback passes, passes under the 25% gate, token
+  totals rounded to the nearest 100, p10/median/p90 reduction ratio, idle-stash passes. No
+  text, paths, ids, hashes or times finer than a day; labels outside fixed allowlists become
+  `other`. Corrupt or old files are skipped and counted, never echoed. `--since YYYY-MM-DD`
+  filters the request log. Sends nothing; CLI only, not exposed over MCP.
+  See `docs/SHARE_STATS.md`.
+
 ## [1.2.0] - 2026-10-19
 
 ### Added

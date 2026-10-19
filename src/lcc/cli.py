@@ -920,6 +920,66 @@ def request_log_command(
     )
 
 
+@app.command("share-stats")
+def share_stats_command(
+    reports: list[Path] | None = typer.Argument(
+        None,
+        metavar="[REPORT]...",
+        help="Report JSON files written by `lcc compact -r` (either mode).",
+        show_default=False,
+    ),
+    request_log_dir: Path | None = typer.Option(
+        None,
+        "--request-log",
+        help="Request-log directory (default: LCC_REQUEST_LOG_DIR or ./.lcc/request-log).",
+    ),
+    no_request_log: bool = typer.Option(
+        False, "--no-request-log", help="Do not read the request log."
+    ),
+    since: str | None = typer.Option(
+        None, "--since", help="Only count request-log entries on or after YYYY-MM-DD."
+    ),
+    as_json: bool = typer.Option(
+        False, "--json", help="Print the lcc-share-stats-1.0 JSON instead of Markdown."
+    ),
+    output: Path | None = typer.Option(
+        None, "--output", "-o", help="Write the summary to this file instead of stdout."
+    ),
+) -> None:
+    """Print an anonymous summary of counts to paste into a "Share your results" issue.
+
+    Reads local reports and the request log only; sends nothing. The summary holds counts,
+    rounded totals and fixed labels: never text, paths, ids, hashes or exact times.
+    """
+    from lcc import request_log, share_stats
+
+    try:
+        since_day = share_stats.parse_since(since)
+    except ValueError as exc:
+        _fail(str(exc), code=2)
+    log_file = (
+        None
+        if no_request_log
+        else (request_log_dir or request_log.log_dir()) / request_log.LOG_FILE
+    )
+    inputs = share_stats.load_inputs(
+        list(reports or []),
+        log_file,
+        since=since_day,
+        warn=lambda message: err_console.print(f"[yellow]warning:[/yellow] {message}"),
+    )
+    summary = share_stats.build_summary(inputs, since=since_day)
+    rendered = share_stats.to_json(summary) if as_json else share_stats.to_markdown(summary)
+    if output is None:
+        sys.stdout.write(rendered)
+        return
+    try:
+        output.write_text(rendered, encoding="utf-8")
+    except OSError as exc:
+        _fail(f"could not write the summary to {output}: {exc}")
+    err_console.print(f"Summary written to: [green]{output}[/green]")
+
+
 @app.command("diff")
 def diff_command(
     left: str = typer.Argument(..., metavar="LEFT", help="First text file (e.g. the original)."),
