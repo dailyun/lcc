@@ -38,7 +38,7 @@ export function resolveOptions(options = {}) {
   if (["jev", "laya", "auto", "rules", "specialist-v3"].includes(String(options.provider))) {
     merged.provider = String(options.provider);
   }
-  if (["lossless", "lossy", "recoverable"].includes(String(options.rulesMode))) {
+  if (["lossless", "lossy", "recoverable", "stashed"].includes(String(options.rulesMode))) {
     merged.rulesMode = String(options.rulesMode);
   }
   merged.threshold = number(options.threshold, DEFAULT_OPTIONS.threshold);

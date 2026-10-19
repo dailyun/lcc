@@ -68,7 +68,7 @@
     "rulesMode": {
       "type": "string",
       "title": "Rules mode",
-      "description": "Only with provider 'rules': 'lossless', 'recoverable' or 'lossy'. Empty uses the server default (lossless). 'recoverable' sends the session directory as workspace_root, so every removed file read is checked against the disk.",
+      "description": "Only with provider 'rules': 'lossless', 'recoverable', 'stashed' or 'lossy'. Empty uses the server default (lossless). 'recoverable' sends the session directory as workspace_root, so every removed file read is checked against the disk. 'stashed' moves removed outputs to a local stash; the agent gets them back with the recall tool (allow mcp__plugin_lcc_lcc__recall).",
       "default": ""
     }
   }

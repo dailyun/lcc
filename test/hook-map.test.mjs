@@ -149,6 +149,12 @@ test("buildCompactArgs sends no rules_mode unless the user opts in", () => {
   assert.equal("rules_mode" in bogus, false);
 });
 
+test("buildCompactArgs passes rules_mode stashed through, without workspace_root", () => {
+  const args = buildCompactArgs({ messages: TRANSCRIPT, options: { provider: "rules", rulesMode: "stashed" }, cwd: "/repo" });
+  assert.equal(args.rules_mode, "stashed");
+  assert.equal("workspace_root" in args, false);
+});
+
 test("buildCompactArgs passes the session cwd as workspace_root for rules_mode recoverable", () => {
   const options = { provider: "rules", rulesMode: "recoverable" };
   const args = buildCompactArgs({ messages: TRANSCRIPT, options, cwd: "/repo" });

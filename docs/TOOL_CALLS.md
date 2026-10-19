@@ -147,9 +147,11 @@ The file-pointer check has two forms (`recoverability_check` in the report):
   measure this form: the historical files have changed since the transcripts were recorded, so
   real-use numbers come from the opt-in request log.
 
-Recommended config for live sessions: `provider: rules`, `rules_mode: recoverable`,
-`workspace_root` = the session's cwd (the Claude Code hook sends it), command pointers off.
-`lossless` stays the default `rules_mode`: it needs no disk and makes no recovery claim.
+Recommended config for live sessions: `provider: rules`, `rules_mode: stashed`, with the
+`recall` tool available to the agent (in Claude Code: allow `mcp__plugin_lcc_lcc__recall`).
+`recoverable` with `workspace_root` = the session's cwd (the Claude Code hook sends it) is the
+option when no local stash is wanted. `lossless` stays the default `rules_mode`: it needs no
+disk and makes no recovery claim, and it cuts well under 1% of real sessions.
 What each mode measured on real agent sessions: [REAL_SESSION_BENCHMARKS.md](REAL_SESSION_BENCHMARKS.md).
 
 **`stashed`** — `src/lcc/relevance/transcript_stash.py`. Removes what `lossy` would drop or
@@ -178,7 +180,20 @@ MCP: tool `recall` with `{"id": "...", "lines": "a-b"}` returns `{sha256, text}`
 is local to the machine running `lcc mcp` over stdio; `lcc mcp --http` refuses both `recall`
 and `rules_mode: "stashed"`, since one disk would be shared by every caller. No TTL or GC yet:
 the stash grows until you delete it (`rm -r ~/.cache/lcc/stash` is safe; pointers to deleted
-blobs just stop resolving). Not benchmarked yet: no reduction figure is claimed for this mode.
+blobs just stop resolving).
+
+Measured once (2026-10-18, label INFERIDO: one run, one owner's sessions, one answerer model),
+on 172 real Claude Code contexts with task probes, in
+[lcc-judge `stashed-recall-v1`](https://github.com/lucasmartins-ai/lcc-judge/tree/main/research/goal-engine-2026-10-04/stashed-recall-v1):
+- `stashed` removed 36.6% of context tokens, with 0 pointer violations.
+- With `recall`, artifact recall was non-inferior to the full context
+  (difference +0.006, 95% CI [−0.023, +0.034]) and recall exact match stayed at 0.98.
+- `recall` is what holds it: on probes whose answer sat only in the stash, exact match was 0.90
+  with the tool and 0.007 without it. Counting what agents fetched back, the effective context
+  was a median 75% of full.
+- For comparison, Claude Code's built-in summary on the same probes
+  ([`probe-eval-v1`](https://github.com/lucasmartins-ai/lcc-judge/tree/main/research/goal-engine-2026-10-04/probe-eval-v1))
+  kept about 10% of tokens but dropped recall exact match to 0.73.
 
 **`lossy` (EXPERIMENTAL)** — failed two session-disjoint blind audits (bench v0.4: 21/150
 decisions flagged; v0.5: 36/132), because its trims and drops remove output an agent may still
