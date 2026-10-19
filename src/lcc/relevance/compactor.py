@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from lcc.cleaning.normalize import require_valid_unicode
 from lcc.relevance.blocks import (
     DEFAULT_MAX_BLOCK_CHARS,
     DEFAULT_MIN_BLOCK_CHARS,
@@ -1204,6 +1205,8 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
     text = request.text
     if not request.question.strip():
         raise ValueError("relevance compaction requires a non-empty objective (--question)")
+    require_valid_unicode(text, "context text")
+    require_valid_unicode(request.question, "objective")
     blocks = split_blocks(
         text,
         min_block_chars=request.min_block_chars,

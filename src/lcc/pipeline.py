@@ -18,6 +18,7 @@ from lcc.cleaning import (
     remove_common_boilerplate,
 )
 from lcc.cleaning.boilerplate import BoilerplateResult
+from lcc.cleaning.normalize import require_valid_unicode
 from lcc.prompt_builder import PromptSpec, build_prompt
 from lcc.reporting.report import build_report
 from lcc.schemas import CleaningStep, CostEstimate, OptimizationReport, TokenCountMethod
@@ -64,6 +65,8 @@ def optimize(request: OptimizationRequest) -> OptimizationResult:
     """
     warnings: list[str] = []
     raw = request.raw_text
+    require_valid_unicode(raw, "input text")
+    require_valid_unicode(request.question, "question")
     if not raw.strip():
         warnings.append("Input text is empty or whitespace-only; nothing to optimize.")
 

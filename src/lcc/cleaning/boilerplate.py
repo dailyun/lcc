@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from lcc.cleaning.normalize import _extract_protected_regions
 from lcc.schemas import CleaningStep
 
 # Each pattern is matched against the FULL stripped line only, so partial content is never
@@ -44,16 +45,22 @@ def remove_common_boilerplate(
     decorative rules (``====``, ``----``, ``****``). Markdown thematic breaks of exactly
     three characters are preserved.
 
+    Lines inside fenced code blocks (and Markdown tables) are never removed: a ``----`` or a
+    ``Page 3 of 10`` inside a fence is program text or sample output, not boilerplate.
+
     Returns the cleaned text and a list of applied actions (one per matching pattern).
     """
     active = patterns if patterns is not None else _DEFAULT_PATTERNS
     counts: dict[str, int] = dict.fromkeys(active, 0)
     kept: list[str] = []
 
-    for line in text.split("\n"):
+    lines = text.split("\n")
+    ranges, _ = _extract_protected_regions(lines)
+    protected = {index for start, end in ranges for index in range(start, end + 1)}
+    for index, line in enumerate(lines):
         stripped = line.strip()
         matched: str | None = None
-        if stripped:
+        if stripped and index not in protected:
             for name, pattern in active.items():
                 if pattern.match(stripped):
                     matched = name
