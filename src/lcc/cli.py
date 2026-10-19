@@ -1420,6 +1420,31 @@ def compact_command(
     output_path: Path | None = typer.Option(
         None, "--output", "-o", help="Write the compacted text here (otherwise stdout)."
     ),
+    cache_state: str = typer.Option(
+        "unknown",
+        "--cache-state",
+        help=(
+            "Provider prompt-cache state for the report's cache_effect: warm, cold or unknown "
+            "(priced as warm). cache_effect.recommended says whether the pass pays for itself."
+        ),
+    ),
+    expected_reuses: int = typer.Option(
+        1, "--expected-reuses", help="Requests expected to reuse the context, for cache_effect."
+    ),
+    previous_output: Path | None = typer.Option(
+        None,
+        "--previous-output",
+        help=(
+            "The previous pass's output (what the provider has cached). cache_effect then "
+            "measures the stable prefix against it and reports a cache epoch if it changed."
+        ),
+    ),
+    cache_read_factor: float = typer.Option(
+        0.10, "--cache-read-factor", help="Cache read price as a multiple of input price."
+    ),
+    cache_write_factor: float = typer.Option(
+        1.25, "--cache-write-factor", help="Cache write price as a multiple of input price."
+    ),
     append_to: Path | None = typer.Option(
         None,
         "--append-to",
@@ -1550,6 +1575,11 @@ def compact_command(
                 ("--no-marker", no_marker, False),
                 ("--marker-scores", marker_scores, False),
                 ("--append-to", append_to, None),
+                ("--cache-state", cache_state, "unknown"),
+                ("--expected-reuses", expected_reuses, 1),
+                ("--previous-output", previous_output, None),
+                ("--cache-read-factor", cache_read_factor, 0.10),
+                ("--cache-write-factor", cache_write_factor, 1.25),
                 ("--require-exact-tokens", require_exact_tokens, False),
                 ("--semantic-verify", enable_semantic_verify, False),
                 ("--no-sufficiency", not enable_sufficiency, False),
@@ -1590,6 +1620,12 @@ def compact_command(
         return
 
     raw = _read_input(input_path)
+    previous_text: str | None = None
+    if previous_output is not None:
+        try:
+            previous_text = previous_output.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            _fail(f"could not read --previous-output {previous_output}: {exc}", code=2)
     request = RelevanceCompactionRequest(
         text=raw,
         question=question,
@@ -1626,6 +1662,11 @@ def compact_command(
         enable_semantic_verify=enable_semantic_verify,
         emit_ir=emit_ir_path is not None,
         source_origin=input_path if input_path != "-" else "stdin",
+        cache_state=cache_state,
+        expected_reuses=expected_reuses,
+        previous_compacted_text=previous_text,
+        cache_read_factor=cache_read_factor,
+        cache_write_factor=cache_write_factor,
     )
     try:
         result = compact_context(request)

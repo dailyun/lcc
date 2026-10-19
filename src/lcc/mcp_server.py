@@ -113,6 +113,7 @@ def _tool_compact_transcript(args: dict[str, Any]) -> dict[str, Any]:
             workspace_root=args.get("workspace_root") or None,
             disk_check=bool(args.get("disk_check", True)),
             allow_command_pointers=args.get("allow_command_pointers") is True,
+            cache_state=_cache_state_arg(args.get("cache_state")),
         )
     )
     if args.get("ref_unchanged") is True or args.get("ref_blocks") is True:
@@ -472,6 +473,15 @@ TOOLS: dict[str, dict[str, Any]] = {
                     "enum": ["idle"],
                     "description": "Request-log label only: 'idle' for the plugin's idle stash.",
                 },
+                "cache_state": {
+                    "type": "string",
+                    "enum": ["warm", "cold", "unknown"],
+                    "default": "unknown",
+                    "description": (
+                        "Provider prompt-cache state for the report's cache_effect "
+                        "(unknown is priced as warm). The idle stash sends 'cold'."
+                    ),
+                },
                 "idle_gap_bucket": {
                     "type": "string",
                     "description": "Request-log label only: the idle gap bucket, e.g. '1h-2h'.",
@@ -579,6 +589,13 @@ def _error(request_id: Any, code: int, message: str) -> dict[str, Any]:
         "id": request_id,
         "error": {"code": code, "message": message},
     }
+
+
+def _cache_state_arg(value: Any) -> str:
+    state = str(value or "unknown")
+    if state not in ("warm", "cold", "unknown"):
+        raise ValueError(f"cache_state must be warm, cold or unknown, got {state!r}")
+    return state
 
 
 def handle_message(message: dict[str, Any]) -> dict[str, Any] | None:
