@@ -287,3 +287,43 @@ def test_log_files_are_private_to_the_owner(log_dir, monkeypatch):
         os.umask(old_umask)
     assert stat.S_IMODE(log_dir.stat().st_mode) == 0o700
     assert stat.S_IMODE((log_dir / request_log.LOG_FILE).stat().st_mode) == 0o600
+
+
+def test_idle_stash_entry_carries_trigger_gap_and_removed_tokens(log_dir, monkeypatch):
+    monkeypatch.setenv(request_log.ENV_FLAG, "1")
+    big = "line of a file that the agent has read already\n" * 400
+    messages = [
+        {"role": "user", "text": "fix the parser"},
+        {
+            "role": "assistant",
+            "text": "",
+            "toolUses": [{"tool_use_id": "t1", "tool": "Read", "input": {"file_path": "a.py"}}],
+        },
+        {"role": "user", "text": "", "toolResults": [{"tool_use_id": "t1", "text": big}]},
+        {"role": "assistant", "text": "done"},
+    ]
+    resp = handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "compact_transcript",
+                "arguments": {
+                    "messages": messages,
+                    "question": "fix the parser",
+                    "provider": "rules",
+                    "rules_mode": "lossless",
+                    "preserve_recent": 1,
+                    "trigger": "idle",
+                    "idle_gap_bucket": "1h-2h",
+                },
+            },
+        }
+    )
+    assert resp is not None and "error" not in resp
+    (entry,) = _entries(log_dir)
+    assert entry["trigger"] == "idle"
+    assert entry["gap_bucket"] == "1h-2h"
+    assert isinstance(entry["removed_tokens"], int) and entry["removed_tokens"] >= 0
+    assert big not in json.dumps(entry)

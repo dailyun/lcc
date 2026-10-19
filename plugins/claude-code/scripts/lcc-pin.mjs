@@ -13,6 +13,11 @@
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
+const IDLE_MARKER = "lcc:idle"; // hooks/map.mjs IDLE_MARKER
+export const IDLE_BLOCK = {
+  decision: "block",
+  reason: "lcc idle stash: the built-in summary never runs for an idle compaction",
+};
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const MAX_FILES = 20;
 const MAX_OBJECTIVE_CHARS = 600;
@@ -120,6 +125,13 @@ export function sessionStartText(facts) {
 function main(mode) {
   try {
     const input = JSON.parse(readFileSync(0, "utf8"));
+    // Backstop for the opt-in idle stash: its compactions must never become the built-in
+    // summary (the costliest thing on a cold cache). Claude Code only reaches PreCompact on
+    // its own summary path, so blocking here leaves the conversation as it is.
+    if (mode === "precompact" && input?.custom_instructions === IDLE_MARKER) {
+      process.stdout.write(`${JSON.stringify(IDLE_BLOCK)}\n`);
+      return;
+    }
     if (typeof input?.transcript_path !== "string") return;
     const facts = extractFacts(readFileSync(input.transcript_path, "utf8").split("\n"));
     const text = mode === "sessionstart" ? sessionStartText(facts) : precompactText(facts);

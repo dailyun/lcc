@@ -6,6 +6,35 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **Claude Code plugin: idle stash (opt-in, off by default).** With `idleStash: true`, a
+  session resumed after `idleTtlSeconds` of idle has its spent tool outputs stashed
+  (`provider: rules`, `rulesMode: stashed`) at `session.start`, before the first request
+  re-writes a prompt cache that has already expired. Every failure answers `{ skip }`, and the
+  classic `PreCompact` hook blocks Claude Code's own summary for an idle compaction, so it never
+  becomes the built-in summary. `idleTtlSeconds` defaults to 7200, not 3600: Claude Code 2.1.296
+  keeps the cache warm for 60 minutes after a turn (cache keepalive), so with a 1-hour TTL it is
+  cold about two hours after the last turn. Resumed interactive sessions only: on 2.1.296
+  `$.session.compact` is refused from `prompt.submit` and in `-p`/SDK sessions, and a timer's
+  call skips the plugin's own hooks (all observed in a disposable session). Other knobs:
+  `idleMinRemovableTokens` (10000), `idleMaxPassesPerSession` (8). The request log
+  (`LCC_REQUEST_LOG=1`) gains `trigger`, `gap_bucket` and `removed_tokens` on idle passes.
+  Evidence (INFERIDO) and limits: `docs/CLAUDE_CODE.md#idle-stash-opt-in`.
+- **`compact_transcript`: `ref_unchanged: true`.** Returns each message the pass left unchanged
+  as `{"ref": <input index>}` and leaves per-call decisions out. Claude Code caps an MCP
+  result (`MAX_MCP_OUTPUT_TOKENS`) and hands a plugin's `$.mcp.call` an error text in place of
+  a larger one; a 12-message session with four 10 KB reads already crossed it (49 KB answer).
+  The idle stash uses it; the `/compact` path is unchanged.
+
+### Fixed
+
+- **`recoverable` / `stashed` disk check vs Claude Code's Read format.** Claude Code 2.1.296
+  numbers the empty line after a file's final newline (`480\t` for a 479-line file), so every
+  whole-file read of a newline-terminated file failed the disk check (`keep_disk_mismatch`)
+  and was never replaced or stashed. That empty trailing row is now ignored; a non-empty one
+  still fails.
+
 ## [1.1.0] - 2026-10-19
 
 ### Added

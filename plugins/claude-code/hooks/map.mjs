@@ -18,7 +18,18 @@ export const DEFAULT_OPTIONS = {
   minReductionRatio: 0.25,
   // Empty: no rules_mode is sent and the server default applies.
   rulesMode: "",
+  // Idle stash (opt-in): after a gap longer than the cache TTL, stash spent tool outputs
+  // before the first request rewrites the whole cold prefix. See docs/CLAUDE_CODE.md.
+  idleStash: false,
+  // 1-hour cache TTL + Claude Code's 60-minute cache keepalive window (2.1.296): the cache of
+  // an open session is cold only about two hours after its last turn.
+  idleTtlSeconds: 7200,
+  idleMinRemovableTokens: 10000,
+  idleMaxPassesPerSession: 8,
 };
+
+/** The instructions an idle-triggered `$.session.compact` carries; the compact hook keys on it. */
+export const IDLE_MARKER = "lcc:idle";
 
 /** Matches the shape `claude-code`'s SessionMessage rebuilds from. */
 const KNOWN_MESSAGE_KEYS = new Set(["role", "text", "toolUses", "toolResults"]);
@@ -62,7 +73,70 @@ export function resolveOptions(options = {}) {
     1,
     Math.max(0, number(options.minReductionRatio, DEFAULT_OPTIONS.minReductionRatio)),
   );
+  merged.idleStash = options.idleStash === true || options.idleStash === "true";
+  merged.idleTtlSeconds = Math.max(
+    1,
+    number(options.idleTtlSeconds, DEFAULT_OPTIONS.idleTtlSeconds),
+  );
+  merged.idleMinRemovableTokens = Math.max(
+    0,
+    number(options.idleMinRemovableTokens, DEFAULT_OPTIONS.idleMinRemovableTokens),
+  );
+  merged.idleMaxPassesPerSession = Math.max(
+    0,
+    Math.trunc(number(options.idleMaxPassesPerSession, DEFAULT_OPTIONS.idleMaxPassesPerSession)),
+  );
   return merged;
+}
+
+/**
+ * Tokens of tool output a pass could remove: every tool result outside the pinned first
+ * message and the newest `preserveRecent` messages. ponytail: chars/4, an upper bound on
+ * what `stashed` removes; the pass itself re-checks with real token counts.
+ */
+export function estimateRemovableTokens(messages, preserveRecent) {
+  const list = messages ?? [];
+  const end = Math.max(1, list.length - Math.max(0, preserveRecent));
+  let chars = 0;
+  for (let index = 1; index < end; index += 1) {
+    for (const result of list[index]?.toolResults ?? []) {
+      if (typeof result?.text === "string") chars += result.text.length;
+    }
+  }
+  return Math.floor(chars / 4);
+}
+
+/** Coarse idle-gap label for toasts and the request log (never the exact time). */
+export function gapBucket(seconds) {
+  if (!(seconds >= 0)) return "unknown";
+  if (seconds < 300) return "<5m";
+  if (seconds < 3600) return "5m-1h";
+  if (seconds < 7200) return "1h-2h";
+  if (seconds < 28800) return "2h-8h";
+  return ">8h";
+}
+
+/**
+ * Should an idle stash run now? `fire: false` carries a `reason`; `notify` marks the ones
+ * worth a toast (the gap is past the TTL, so the user would expect a pass).
+ */
+export function idleDecision({ options, lastEnd, passedEnd, now, passes, removable }) {
+  const config = resolveOptions(options);
+  if (!config.idleStash) return { fire: false, reason: "off" };
+  if (typeof lastEnd !== "number" || typeof now !== "number") {
+    return { fire: false, reason: "no previous request" };
+  }
+  // Never twice over the same history: a pass needs a new request after the last one.
+  if (passedEnd === lastEnd) return { fire: false, reason: "already stashed since the last request" };
+  const gapSeconds = (now - lastEnd) / 1000;
+  if (!(gapSeconds >= config.idleTtlSeconds)) return { fire: false, reason: "cache warm", gapSeconds };
+  if ((passes ?? 0) >= config.idleMaxPassesPerSession) {
+    return { fire: false, notify: true, gapSeconds, reason: `${config.idleMaxPassesPerSession} passes already this session` };
+  }
+  if (typeof removable === "number" && removable < config.idleMinRemovableTokens) {
+    return { fire: false, notify: true, gapSeconds, reason: `about ${removable} removable tokens, under ${config.idleMinRemovableTokens}` };
+  }
+  return { fire: true, gapSeconds };
 }
 
 /** The objective the judge is asked about: the explicit option or the `/compact` text when
@@ -102,7 +176,7 @@ export function hasUnsupportedContent(messages) {
  * `cwd` is the session's working directory: with rules_mode recoverable it becomes the
  * workspace_root, so the server checks each removed file read against the disk.
  */
-export function buildCompactArgs({ messages, instructions, options, cwd }) {
+export function buildCompactArgs({ messages, instructions, options, cwd, extra }) {
   const config = resolveOptions(options);
   const question = (config.question || instructions || deriveGoal(messages)).trim();
   if (!question) return null;
@@ -122,6 +196,7 @@ export function buildCompactArgs({ messages, instructions, options, cwd }) {
     max_request_tokens: config.maxRequestTokens,
     min_reduction: config.minReductionRatio,
     ...rules,
+    ...extra,
   };
 }
 
@@ -194,6 +269,21 @@ export function decideReplacement({ report, messages, minReductionRatio }) {
     replace: true,
     reason: `kept ${messages.length} messages, dropped ${dropped} tool call(s), trimmed ${trimmed}, deduped ${deduped}, replaced ${replaced}`,
   };
+}
+
+/**
+ * Expands a `ref_unchanged` answer: `{ ref: i }` is `source[i]`, the caller's own message
+ * (with its engine `handle`, when it had one); anything else is rebuilt. Throws on a ref
+ * outside `source`, so a mismatched answer never reaches the session.
+ */
+export function expandRefs(messages, source) {
+  return (messages ?? []).map((message) => {
+    if (typeof message?.ref !== "number") return toSessionMessages([message])[0];
+    if (!Number.isInteger(message.ref) || message.ref < 0 || message.ref >= (source?.length ?? 0)) {
+      throw new Error(`ref ${message.ref} outside the transcript`);
+    }
+    return source[message.ref];
+  });
 }
 
 /** The compacted conversation in the shape the engine rebuilds messages from. */

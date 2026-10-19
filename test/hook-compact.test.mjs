@@ -18,7 +18,7 @@ const TRANSCRIPT = [
 
 async function argsSent(event, options) {
   let handler;
-  register((name, fn) => { if (name === "session.compact") handler = fn; }, options);
+  register((name, fn) => { if (name === "session.compact") handler = fn; return { catch() {} }; }, options);
   let sent = null;
   const $ = {
     ui: { log() {}, toast() {} },
