@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-19
+
 ### Added
 
 - **Claude Code plugin: `rulesMode: "stashed"`.** The plugin accepted only `lossless`,
@@ -562,7 +564,8 @@ response verification — those remain roadmap items (see `docs/roadmap.md`).
   `CODE_OF_CONDUCT.md`, the `docs/` set (architecture, evaluation, roadmap, release, ADRs),
   examples, and agent guidance (`CLAUDE.md`, `AGENTS.md`).
 
-[Unreleased]: https://github.com/lucasmartins-ai/lcc/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/lucasmartins-ai/lcc/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/lucasmartins-ai/lcc/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/lucasmartins-ai/lcc/compare/v0.5.0...v1.0.0
 [0.5.0]: https://github.com/lucasmartins-ai/lcc/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/lucasmartins-ai/lcc/compare/v0.2.0...v0.4.0
