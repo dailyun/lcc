@@ -115,13 +115,17 @@ def _tool_compact_transcript(args: dict[str, Any]) -> dict[str, Any]:
             allow_command_pointers=args.get("allow_command_pointers") is True,
         )
     )
-    if args.get("ref_unchanged") is True:
+    if args.get("ref_unchanged") is True or args.get("ref_blocks") is True:
         # Compact answer for callers whose transport caps the result (Claude Code's
         # $.mcp.call goes through MAX_MCP_OUTPUT_TOKENS): a message that left the pass
         # unchanged comes back as {"ref": <input index>}, and per-call decisions stay out.
         source = messages_to_payload(parse_transcript(request_payload))
         report = {key: value for key, value in result.report.items() if key != "decisions"}
-        compacted = _ref_unchanged(source, messages_to_payload(result.messages))
+        if args.get("ref_blocks") is True:
+            indices = [message.message_index for message in result.messages]
+            compacted = _ref_blocks(source, messages_to_payload(result.messages), indices)
+        else:
+            compacted = _ref_unchanged(source, messages_to_payload(result.messages))
         return {"messages": compacted, "report": report}
     return {
         "messages": messages_to_payload(result.messages),
@@ -151,6 +155,94 @@ def _ref_unchanged(
         else:
             out.append({"ref": index})
             cursor = index + 1
+    return out
+
+
+def _utf16_len(text: str) -> int:
+    """Length in UTF-16 code units: what a JavaScript caller's ``slice`` counts."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _splice(old: str, new: str) -> dict[str, Any]:
+    """``new`` as ``old[:head] + text + old[-tail:]``, head and tail in UTF-16 units.
+
+    A trimmed result keeps the original's first characters, so only the note travels.
+    """
+    head = 0
+    limit = min(len(old), len(new))
+    while head < limit and old[head] == new[head]:
+        head += 1
+    tail = 0
+    while tail < limit - head and old[-1 - tail] == new[-1 - tail]:
+        tail += 1
+    patch: dict[str, Any] = {"text": new[head : len(new) - tail]}
+    if head:
+        patch["head"] = _utf16_len(old[:head])
+    if tail:
+        patch["tail"] = _utf16_len(old[len(old) - tail :])
+    return patch
+
+
+def _block_patch(original: dict[str, Any], message: dict[str, Any]) -> dict[str, Any] | None:
+    """A changed message as indices into ``original``'s blocks; None when it cannot be one.
+
+    The pass never edits text or a tool call, it only removes calls and replaces results:
+    ``toolUses`` lists the kept calls' indices, ``toolResults`` a kept result's index or
+    ``{"ref": index, "text", "head"?, "tail"?}`` for a replaced one.
+    """
+    if message.get("role") != original.get("role") or message.get("text") != original.get(
+        "text"
+    ):
+        return None
+    uses_before = original.get("toolUses", [])
+    uses: list[int] = []
+    for use in message.get("toolUses", []):
+        index = next(
+            (i for i in range(uses[-1] + 1 if uses else 0, len(uses_before))
+             if uses_before[i] == use),
+            None,
+        )
+        if index is None:
+            return None
+        uses.append(index)
+    results_before = original.get("toolResults", [])
+    results: list[Any] = []
+    cursor = 0
+    for result in message.get("toolResults", []):
+        index = next(
+            (i for i in range(cursor, len(results_before))
+             if results_before[i]["tool_use_id"] == result["tool_use_id"]),
+            None,
+        )
+        if index is None or results_before[index].get("is_error") != result.get("is_error"):
+            return None
+        cursor = index + 1
+        before = results_before[index]
+        results.append(
+            index if before == result
+            else {"ref": index, "tool_use_id": result["tool_use_id"]}
+            | _splice(before["text"], result["text"])
+        )
+    return {"toolUses": uses, "toolResults": results}
+
+
+def _ref_blocks(
+    source: list[dict[str, Any]], compacted: list[dict[str, Any]], indices: list[int]
+) -> list[dict[str, Any]]:
+    """``ref_blocks``: refs down to the block, so the answer carries only what is new.
+
+    ``indices[i]`` is the input position ``compacted[i]`` came from. An unchanged message is
+    ``{"ref": i}``; a changed one is ``{"ref": i, "toolUses": [...], "toolResults": [...]}``
+    (see :func:`_block_patch`); one that cannot be patched is sent whole.
+    """
+    out: list[dict[str, Any]] = []
+    for index, message in zip(indices, compacted, strict=True):
+        original = source[index]
+        if message == original:
+            out.append({"ref": index})
+            continue
+        patch = _block_patch(original, message)
+        out.append(message if patch is None else {"ref": index} | patch)
     return out
 
 
@@ -362,6 +454,17 @@ TOOLS: dict[str, dict[str, Any]] = {
                     "description": (
                         "Return each message the pass left unchanged as {'ref': <input "
                         "index>} and leave per-call decisions out, for size-capped callers."
+                    ),
+                },
+                "ref_blocks": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "ref_unchanged down to the block: a changed message comes back as "
+                        "{'ref': <input index>, 'toolUses': [<kept call index>...], "
+                        "'toolResults': [<kept result index> | {'ref', 'tool_use_id', "
+                        "'text', 'head'?, 'tail'?}...]}, a replaced result being "
+                        "original[:head] + text + original[-tail:] (UTF-16 units)."
                     ),
                 },
                 "trigger": {

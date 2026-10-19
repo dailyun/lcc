@@ -25,7 +25,6 @@ import {
   idleDecision,
   parseToolResult,
   resolveOptions,
-  toSessionMessages,
 } from "./map.mjs";
 
 function notify($, text) {
@@ -52,6 +51,11 @@ const IDLE_KEY_PREFIX = "idle:";
 const DEFAULT_SERVER = "plugin:lcc:lcc"; // the manifest's .mcp.json key "lcc"
 const IDLE_KEYS_KEPT = 64;
 
+// Claude Code caps an MCP result (MAX_MCP_OUTPUT_TOKENS, 25,000 tokens by default on 2.1.296)
+// and hands `$.mcp.call` a pointer text in place of a larger one. Asked this way, the server
+// answers with refs into the transcript the hook sent: only replaced text travels back.
+const COMPACT_ANSWER = { ref_unchanged: true, ref_blocks: true };
+
 /** Per-session idle state in the plugin's store: `{ end, passes }`, `end` in clock ms. */
 async function remember($, key, value) {
   await $.store.set(key, value);
@@ -77,7 +81,7 @@ export async function stashIdle($, messages, configured, gap = "unknown", cwd) {
     const args = buildCompactArgs({
       messages: messages ?? [],
       options,
-      extra: { trigger: "idle", idle_gap_bucket: gap, ref_unchanged: true, ...root },
+      extra: { trigger: "idle", idle_gap_bucket: gap, ...COMPACT_ANSWER, ...root },
     });
     if (!args) return { skip: "no objective to judge against" };
     const { content, isError } = await $.mcp.call(configured.server, "compact_transcript", args);
@@ -90,7 +94,6 @@ export async function stashIdle($, messages, configured, gap = "unknown", cwd) {
       return { skip: `removed ${Number.isFinite(removed) ? removed : "?"} tokens, under ${configured.idleMinRemovableTokens}` };
     }
     return {
-      // Unchanged messages come back as refs: Claude Code caps an MCP result's size.
       messages: expandRefs(payload.messages, messages),
       removed,
       stashed: payload.report.tool_calls_stashed ?? 0,
@@ -198,6 +201,7 @@ export const register = (on, options) => {
       instructions: event.instructions,
       options: configured,
       cwd: sessionCwd(event),
+      extra: COMPACT_ANSWER,
     });
     if (!args) return next(event);
 
@@ -221,7 +225,7 @@ export const register = (on, options) => {
       }
       const via = payload.report?.provider_used ?? configured.provider;
       notify($, `lcc: verbatim compaction via ${via}, no summary (${decision.reason})`);
-      return { messages: toSessionMessages(payload.messages) };
+      return { messages: expandRefs(payload.messages, event.messages) };
     } catch (error) {
       notify($, `lcc: built-in summary (${message(error)})`);
       return next(event);

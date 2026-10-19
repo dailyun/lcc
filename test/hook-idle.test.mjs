@@ -88,6 +88,7 @@ const KEPT = [{ role: "user", text: "Fix the parser." }];
   assert.equal(seen.args.idle_gap_bucket, "1h-2h");
   assert.equal(seen.args.question, "Fix the parser.", "the marker is not the objective");
   assert.equal(seen.args.ref_unchanged, true);
+  assert.equal(seen.args.ref_blocks, true);
 }
 {
   // A ref answer: unchanged messages are the caller's own objects (engine handle kept).

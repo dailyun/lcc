@@ -256,6 +256,9 @@ compacted_messages = messages_to_payload(result.messages)
 ```
 
 MCP clients get the same pass as the tool `compact_transcript` (see `docs/MCP.md`).
+Clients that cap a tool result's size ask for `ref_unchanged: true, ref_blocks: true`: the
+answer refers back to the input by index and carries only replaced text (the Claude Code plugin
+does, see [`docs/CLAUDE_CODE.md`](CLAUDE_CODE.md#the-mcp-result-cap)).
 
 ## 9. Limits, stated plainly
 
