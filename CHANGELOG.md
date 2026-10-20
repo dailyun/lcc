@@ -163,6 +163,7 @@ All notable changes to this project are documented here. The format is based on
   `--only replace|dedupe`. Tool-call rows show the message and tool instead of `lines ?-?`,
   and the meaningless `Thresholds` row is dropped for `rules`.
 - `mypy` passes with and without `tiktoken` installed (no unused `type: ignore`).
+- Reject non-finite or out-of-range `min_reduction` values before invoking the MCP compactor (#77); valid values are between 0 and 1 inclusive.
 
 - Boilerplate removal deleted `----`, `Page 3 of 10`, `On … wrote:` and similar lines inside
   fenced code blocks.

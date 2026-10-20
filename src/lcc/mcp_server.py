@@ -107,6 +107,9 @@ def _tool_compact_transcript(args: dict[str, Any]) -> dict[str, Any]:
     threshold = _number(args, "threshold", 0.5)
     if not 0.0 <= threshold <= 1.0:
         raise ToolInputError("threshold must be between 0 and 1")
+    min_reduction = _number(args, "min_reduction", 0.25)
+    if not 0.0 <= min_reduction <= 1.0:
+        raise ToolInputError("min_reduction must be between 0 and 1")
     preserve_recent = _number(args, "preserve_recent", 6, int)
     trim_head_chars = _number(args, "trim_head_chars", 300, int)
     if preserve_recent < 0 or trim_head_chars < 0:
@@ -123,7 +126,7 @@ def _tool_compact_transcript(args: dict[str, Any]) -> dict[str, Any]:
             max_state_tokens=_number(args, "max_state_tokens", 25000, int),
             max_request_tokens=_number(args, "max_request_tokens", 30000, int),
             max_workers=_number(args, "max_workers", 4, int),
-            min_reduction=_number(args, "min_reduction", 0.25),
+            min_reduction=min_reduction,
             laya_model=args.get("laya_model"),
             jev_model=str(args.get("jev_model", "jev-latest")),
             rules_mode=str(args.get("rules_mode", "lossless")),
