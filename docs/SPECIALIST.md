@@ -17,7 +17,7 @@ when named (`provider="laya"`); no automatic or fallback path selects either.
 | Request | Provider used |
 | --- | --- |
 | `provider="auto"` with `segments`, no decision cache | `specialist-v3`, `degraded: false` (Jev is not even resolved) |
-| `provider="auto"`, plain text | Jev when available, else `mechanical` (unchanged; never Laya) |
+| `provider="auto"`, plain text | `mechanical` (local; Jev only with `LCC_AUTO_REMOTE=1` and a key; never Laya) |
 | `provider="specialist-v3"` with `segments` | `specialist-v3` |
 | `provider="specialist-v3"` without `segments` | `specialist-v3`, with warning `specialist_v3_no_block_metadata` (every block has unknown role/kind/tool, which the model never saw in training) |
 | `provider="jev"` / `provider="laya"` | that judge, as before (opt-in) |

@@ -378,7 +378,8 @@ def test_empty_input_prints_a_valid_summary(tmp_path: Path) -> None:
     assert "passes | 0" in result.stdout
     assert "Not found" in result.stdout
     assert "n/a / n/a / n/a" in result.stdout
-    assert '"Share your results"' in result.stdout.splitlines()[-1]
+    assert '"Share your numbers"' in result.stdout.splitlines()[-1]
+    assert "template=results.yml" in result.stdout.splitlines()[-1]
 
     skipped_log = _run("--no-request-log", "--json")
     summary = json.loads(skipped_log.stdout)

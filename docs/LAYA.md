@@ -151,7 +151,7 @@ provenance: `benchmarks/research/RESEARCH_STATUS.md`.
 | Offline, CI, huge dossier, max reduction, no new deps | `--provider mechanical` | Lexical baseline, unbounded context, drops only zero-overlap (+ safety net). `semantic_guarantee: none`. |
 | Offline **with** a real semantic pass, no API key | `--provider laya` | Local System 1 judgment inside a 512/1024 budget. More conservative than mechanical (keeps more), `semantic_guarantee: judged`, $0. |
 | Strongest judgment on subtle/paraphrased evidence, key available | `--provider jev` | Remote 32K System 1, best on nuance. Costs ~$0.001/call, needs `TYPESAFE_API_KEY`. |
-| Don't care, just work | `--provider auto` | Prefers Jev, falls back to mechanical with `degraded:true`. Explicit is better for audits. |
+| Don't care, just work | `--provider auto` | Local `mechanical` with `degraded:true` (Jev only with `LCC_AUTO_REMOTE=1` and a key). Explicit is better for audits. |
 
 Decision shortcut:
 

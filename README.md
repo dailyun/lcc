@@ -145,7 +145,8 @@ case. Timings are from macOS arm64 under heavy machine load. Method, every arm a
 Ran lcc on your own sessions? Open a
 [results issue](https://github.com/lucasmartins-ai/lcc/issues/new?template=results.yml) with
 counts only: version, provider, tokens before and after, `recall` calls, and whether the agent
-lost anything. Never paste session text. Numbers from other agents and other people's
+lost anything. `lcc share-stats` prints those counts from your local reports, ready to paste
+([SHARE_STATS.md](docs/SHARE_STATS.md)). Never paste session text. Numbers from other agents and other people's
 workloads are the evidence this project is missing.
 
 ## What it does not do

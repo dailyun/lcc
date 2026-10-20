@@ -92,6 +92,13 @@ body:
       description: Options you changed from the defaults, session size in messages or tool calls, how you counted tokens.
     validations:
       required: false
+  - type: textarea
+    id: share-stats
+    attributes:
+      label: "`lcc share-stats` output (optional)"
+      description: Paste the Markdown that `lcc share-stats` prints. Read it first; it holds counts only.
+    validations:
+      required: false
   - type: checkboxes
     id: privacy
     attributes:

@@ -34,7 +34,8 @@ SCHEMA_VERSION = "lcc-share-stats-1.0"
 GATE = 0.25  # the default minimum-reduction gate of `lcc compact` (both modes)
 TOKEN_ROUNDING = 100
 MIN_PASSES_FOR_LIST = 5  # below this, per-pass ratios are left out
-ISSUE_TEMPLATE = "Share your results"
+ISSUE_TEMPLATE = "Share your numbers"  # name: in .github/ISSUE_TEMPLATE/results.yml
+ISSUE_URL = "https://github.com/lucasmartins-ai/lcc/issues/new?template=results.yml"
 
 _RELEVANCE_PREFIX = "relevance-compaction-1."
 _TRANSCRIPT_PREFIX = "transcript-compaction-1."
@@ -451,7 +452,6 @@ def to_markdown(summary: dict[str, Any]) -> str:
         ]
     lines += [
         "",
-        f'Paste this into a new "{ISSUE_TEMPLATE}" issue: '
-        "https://github.com/lucasmartins-ai/lcc/issues/new/choose",
+        f'Paste this into a new "{ISSUE_TEMPLATE}" issue: {ISSUE_URL}',
     ]
     return "\n".join(lines) + "\n"

@@ -947,7 +947,7 @@ def share_stats_command(
         None, "--output", "-o", help="Write the summary to this file instead of stdout."
     ),
 ) -> None:
-    """Print an anonymous summary of counts to paste into a "Share your results" issue.
+    """Print an anonymous summary of counts to paste into a "Share your numbers" issue.
 
     Reads local reports and the request log only; sends nothing. The summary holds counts,
     rounded totals and fixed labels: never text, paths, ids, hashes or exact times.

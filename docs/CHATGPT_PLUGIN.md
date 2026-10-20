@@ -54,7 +54,7 @@ Do not expose this process directly to the internet as plain HTTP.
 
 Without `LCC_HTTP_TOKEN` every caller is anonymous and limited to the offline providers:
 `mechanical` for `compact` and `rules` for `compact_transcript`. Asking for `jev`, `auto`
-or `laya` (including `compact_transcript` with no provider, which defaults to `jev`) is
+or `laya` (including `compact_transcript` with no provider, which defaults to `auto`) is
 refused with JSON-RPC error `-32602`. This stops anyone who reaches the
 URL from spending your TypeSafe key or loading Laya weights on the host.
 

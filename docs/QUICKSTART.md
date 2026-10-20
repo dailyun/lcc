@@ -123,7 +123,7 @@ match or not; the summary tells you. Never touches the network.
 | `inspect` | yes | no | read-only diagnostic |
 | `compact --provider mechanical` | yes | no | lexical baseline; no semantic judgment |
 | `compact --provider laya` | yes (extra or honest fallback) | no | offline semantic; missing extra → `laya+mechanical_fallback`, `degraded: true` |
-| `compact --provider jev` / `auto` | falls back, never silent | yes for judgment | no key → `auto` falls back to mechanical, `jev` keeps everything (`degraded`) |
+| `compact --provider jev` / `auto` | falls back, never silent | yes for judgment | `auto` stays on mechanical unless `LCC_AUTO_REMOTE=1`; no key → `jev` keeps everything (`degraded`) |
 | `explain` / `inspect --ir` | yes | no | reads reports/IR only |
 | `diff` | yes | no | compares two files only |
 | `share-stats` | yes | no | anonymous counts from local reports and the request log; sends nothing |

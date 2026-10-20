@@ -25,8 +25,9 @@ lcc share-stats reports/*.json --json -o share-stats.json
 | `--json` | Print the `lcc-share-stats-1.0` JSON instead of Markdown. |
 | `-o, --output FILE` | Write the summary to FILE instead of stdout. |
 
-Then open a new **"Share your results"** issue
-(<https://github.com/lucasmartins-ai/lcc/issues/new/choose>) and paste the output.
+Then open a new **"Share your numbers"** issue
+(<https://github.com/lucasmartins-ai/lcc/issues/new?template=results.yml>) and paste the
+output into its last field.
 
 ## What is in it
 
@@ -107,7 +108,7 @@ the major version.
 | idle gap buckets | 2h-8h 1 |
 | lcc versions | 1.2.0 3 |
 
-Paste this into a new "Share your results" issue: https://github.com/lucasmartins-ai/lcc/issues/new/choose
+Paste this into a new "Share your numbers" issue: https://github.com/lucasmartins-ai/lcc/issues/new?template=results.yml
 ```
 
 `share-stats` is a CLI command only; the MCP server does not expose it.
