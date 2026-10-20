@@ -44,6 +44,7 @@ from typing import Any
 
 from lcc import __version__
 from lcc.mcp_server import handle_message
+from lcc.relevance.transcript import TranscriptError
 
 LOGGER = logging.getLogger("lcc.chatgpt")
 
@@ -221,6 +222,10 @@ def _handle(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, bool]:
             or _anonymous_provider_refusal(payload)
             or handle_message(payload)
         )
+    except TranscriptError as exc:
+        # Shape errors name only the caller's own fields and indices, never server paths,
+        # so the caller gets the reason (e.g. text under 'content') instead of a bare error.
+        response = _error_response(payload.get("id"), -32602, str(exc))
     except Exception:  # never echo an exception (it may quote input or paths) to a caller
         LOGGER.exception("tool call failed: %s", payload.get("method"))
         response = _error_response(payload.get("id"), -32603, "internal error")

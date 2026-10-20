@@ -158,7 +158,8 @@ class Inputs:
 def _number(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
-    if not math.isfinite(value) or value < 0:
+    # Above 1e12 no real report exists; refusing it keeps sums finite (no overflow on rounding).
+    if not math.isfinite(value) or value < 0 or value > 1e12:
         return None
     return float(value)
 

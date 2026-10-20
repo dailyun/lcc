@@ -459,3 +459,11 @@ def test_output_file(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert result.stdout == ""
     assert out.read_text(encoding="utf-8").startswith("## lcc share-stats")
+
+
+def test_absurd_token_counts_are_skipped_not_overflowed():
+    from lcc.share_stats import parse_report
+
+    payload = {"schema_version": "relevance-compaction-1.2", "tokens_before": 1e308,
+               "tokens_after": 1.0, "reduction_ratio": 0.5}
+    assert parse_report(payload) == "invalid_fields"

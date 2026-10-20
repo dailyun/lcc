@@ -10,7 +10,7 @@
 [![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/lucasmartins-ai/lcc?style=social)](https://github.com/lucasmartins-ai/lcc/stargazers)
 
-<img src="https://raw.githubusercontent.com/lucasmartins-ai/lcc/main/demos/session.gif" alt="lcc compacting a 50-message Claude Code debugging session offline with --provider rules --rules-mode stashed: 9,211 to 6,634 tokens, every user and assistant message byte-identical, five old file reads replaced by lcc recall pointers, lcc explain listing why each one went, and lcc recall returning a removed output byte for byte" width="900">
+<img src="https://raw.githubusercontent.com/lucasmartins-ai/lcc/main/demos/session.gif" alt="lcc compacting a 50-message Claude Code debugging session offline with --provider rules --rules-mode stashed: about 9,211 to 6,634 tokens (approximate count), every user and assistant message byte-identical, five old file reads replaced by lcc recall pointers, lcc explain listing why each one went, and lcc recall returning a removed output byte for byte" width="900">
 
 </div>
 
@@ -101,9 +101,11 @@ check `provider_used` and `degraded` before trusting the output.
 ## Benchmarks
 
 **Synthetic transcript A/B** against a reference implementation of the same drop-the-spent-calls
-idea (`fast-jev-compaction`), three sessions, one seed: lcc removed 13.3 / 39.2 / 55.7% at fact
-recall 1.00; the reference removed 70.5 / 78.9 / 83.4% at recall 0.00, losing every evidence
-pair ([TRANSCRIPT_AB.md](benchmarks/research/TRANSCRIPT_AB.md)).
+idea (`fast-jev-compaction`), three sessions, one seed, both scored by the opt-in remote Jev
+judge: lcc removed 13.3 / 39.2 / 55.7% at fact recall 1.00; the reference removed
+70.5 / 78.9 / 83.4% at recall 0.00, losing every evidence pair. In one of four runs lcc also
+dropped an evidence pair on the largest session
+([TRANSCRIPT_AB.md](benchmarks/research/TRANSCRIPT_AB.md)).
 
 **Real sessions, ranker only (held-out, INFERIDO).** A one-shot final test on 193 items from 36
 of the maintainer's sessions that started after the training cutoff. Recall AUC is the share of

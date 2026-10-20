@@ -77,6 +77,19 @@ def test_http_errors_never_echo_exception_text(monkeypatch):
                         "error": {"code": -32603, "message": "internal error"}}
 
 
+def test_http_transcript_shape_errors_keep_their_reason(monkeypatch):
+    from lcc.relevance.transcript import TranscriptError
+
+    def shape_error(_message):
+        raise TranscriptError("message 0 has text under 'content'")
+
+    monkeypatch.setattr(chatgpt_server, "handle_message", shape_error)
+    response, _ = chatgpt_server._handle({"jsonrpc": "2.0", "id": 8, "method": "tools/call"})
+    assert response == {"jsonrpc": "2.0", "id": 8,
+                        "error": {"code": -32602,
+                                  "message": "message 0 has text under 'content'"}}
+
+
 @pytest.mark.parametrize("bad", ["../../etc/passwd", "/etc/passwd", "abc", "A" * 64,
                                  "0123456789ab/..", "0123456789ab*"])
 def test_recall_refuses_ids_that_are_not_hex(bad, tmp_path, monkeypatch):
