@@ -7,14 +7,15 @@ happened to be on screen. This runs the actual commands, captures their actual s
 it into frames. Same input, same GIF, every time, and no tool in the loop that can silently
 produce a blank result.
 
-    python3 demos/make_gifs.py            # all four
-    python3 demos/make_gifs.py session    # one (the README hero)
+    python3 demos/make_gifs.py            # all three
+    python3 demos/make_gifs.py compact    # one
 
 Requires Pillow (system python3 has it) and the repository's own `lcc` on PATH.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -65,7 +66,7 @@ def font(size: int = FONT_SIZE) -> ImageFont.FreeTypeFont:
 def run(cmd: list[str]) -> str:
     """Run a real command and return its combined, ANSI-stripped output."""
     proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=180)
-    return ANSI_RE.sub("", (proc.stdout or "") + (proc.stderr or "")).rstrip("\n")
+    return ANSI_RE.sub("", (proc.stdout or "") + (proc.stderr or "")).rstrip("\n").expandtabs(4)
 
 
 def wrap(text: str, width_chars: int) -> list[str]:
@@ -267,20 +268,43 @@ def demo_audio() -> None:
     build("audio-to-prompt", script, "lcc intake — voice transcript to structured prompt")
 
 
-def demo_session() -> None:
-    # The README hero has its own scenes (title and end cards, a transcript view), so it lives
-    # in a sibling module that reuses this file's palette and font.
-    from session_gif import demo_session as render_session
+def demo_stash() -> None:
+    """The Claude Code path: measure a session, compact it with `stashed`, recall one output."""
+    os.environ["LCC_STASH_DIR"] = "/tmp/lcc-demo-stash"  # never the viewer's real stash
+    os.environ["LCC_DISABLE_NETWORK"] = "1"
+    session = "demos/claude-session.jsonl"
+    question = "which file and line was the original failure on?"
+    compact_args = [
+        "lcc", "compact", session, "-q", question, "--mode", "tool-calls",
+        "--provider", "rules", "--rules-mode", "stashed",
+        "-o", "/tmp/lcc-session.json", "-r", "/tmp/lcc-session.report.json",
+    ]
+    measured = run(["lcc", "measure-session", session])
+    compacted = run(compact_args)
+    compacted = "\n".join(  # the "written to" lines and the judge/state rows say nothing here
+        line for line in compacted.splitlines()
+        if not line.startswith(("Compacted", "Compaction", "/", "State", "Messages"))
+    )
+    report = json.loads(Path("/tmp/lcc-session.report.json").read_text())
+    stash_dir = Path(os.environ["LCC_STASH_DIR"])
+    stash = next(
+        d["stash"] for d in report["decisions"]
+        if "stash" in d and '"""backoff:' in (stash_dir / d["stash"]["sha256"]).read_text()[:40]
+    )
+    stash_id = stash["sha256"][:12]
+    script = [
+        ("# A long Claude Code session: 91 messages, 44 tool calls (synthetic, in the repo)", None),
+        (f"lcc measure-session {session}", measured),
+        ("# Compact it: old outputs go to a local stash, every message stays byte for byte", None),
+        (" ".join(compact_args[:3]) + f" -q '{question}' " + " ".join(compact_args[5:]), compacted),
+        ("# Later the agent edits backoff.py. The old read is one call away, hash-checked:", None),
+        (f"lcc recall {stash_id} --lines 6-9",
+         run(["lcc", "recall", stash_id, "--lines", "6-9"])),
+    ]
+    build("stash", script, "lcc — verbatim compaction for Claude Code, offline")
 
-    render_session()
 
-
-DEMOS = {
-    "session": demo_session,
-    "compact": demo_compact,
-    "compile": demo_compile,
-    "audio": demo_audio,
-}
+DEMOS = {"compact": demo_compact, "compile": demo_compile, "audio": demo_audio, "stash": demo_stash}
 
 
 def main() -> None:

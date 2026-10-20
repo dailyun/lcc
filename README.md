@@ -2,7 +2,8 @@
 
 # lcc — Local Context Compiler
 
-**Shrink what you send to the model. Keep every byte you didn't cut. Get a receipt.**
+**Compact coding-agent context without summarizing it away.**<br>
+lcc cuts what the model does not need, keeps everything else byte for byte, and writes a receipt.
 
 [![PyPI](https://img.shields.io/pypi/v/local-context-compiler.svg)](https://pypi.org/project/local-context-compiler/)
 [![Python](https://img.shields.io/pypi/pyversions/local-context-compiler.svg)](https://pypi.org/project/local-context-compiler/)
@@ -10,57 +11,52 @@
 [![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/lucasmartins-ai/lcc?style=social)](https://github.com/lucasmartins-ai/lcc/stargazers)
 
-<img src="https://raw.githubusercontent.com/lucasmartins-ai/lcc/main/demos/session.gif" alt="lcc compacting a 50-message Claude Code debugging session offline with --provider rules --rules-mode stashed: about 9,211 to 6,634 tokens (approximate count), every user and assistant message byte-identical, five old file reads replaced by lcc recall pointers, lcc explain listing why each one went, and lcc recall returning a removed output byte for byte" width="900">
+<img src="https://raw.githubusercontent.com/lucasmartins-ai/lcc/main/demos/stash.gif" alt="lcc measure-session on a 91-message Claude Code session, then lcc compact with the stashed mode, then lcc recall returning the exact lines of a removed file read" width="820">
 
 </div>
 
 <!-- mcp-name: io.github.lucasmartins-ai/lcc -->
 
-`lcc` cuts what an agent or a prompt does not need from its context, keeps everything else
-**byte for byte**, and writes a receipt saying what went and why. Nothing is summarized or
-rewritten. It runs locally on your CPU, with no API key by default.
+## `/compact` vs lcc
 
-## Claude Code: `/compact` without the summary
+Claude Code's `/compact` replaces your session with a summary written by a model. Summaries
+drop the exact error, path or line the agent needs two turns later. lcc does the opposite: old
+tool outputs leave the context but stay one `recall` away, and every user and assistant message
+is kept as it was.
 
-- **Before:** Claude Code's `/compact` replaces the history with a model-written summary. What
-  the summary leaves out is no longer in the context.
-- **After, with the plugin:** the history stays as it was, user and assistant text byte for
-  byte; only spent tool calls and results are dropped or trimmed, each with a reason in the
-  report. If a pass fails or removes less than 25%, the plugin hands back to the built-in
-  summary.
+| One real Claude Code session (193 messages, 75 tool calls) | tokens | user and assistant messages | removed tool outputs |
+| --- | ---: | --- | --- |
+| before | 45,435 | 43, as written | — |
+| `/compact` | one summary | rewritten into the summary | gone |
+| **lcc** (`rules`, `stashed`) | **21,397 (−52.9%)** | **43 / 43 byte for byte** | 33, each one `recall` away |
 
-One real Claude Code session in this repository went from **55,411 to 18,761 tokens
-(−66.1%)** with all 42 user/assistant texts byte-identical. That is **n=2** real sessions (the
-other, a 337-message Hermes session, −81.7%), measured with the opt-in Jev judge; the plugin's
-default local ranker, `specialist-v3`, was not part of that run
-([REAL_SESSIONS.md](benchmarks/research/REAL_SESSIONS.md)). Do not expect that everywhere: the
-`rules` modes, which remove only provable duplicates, cut 0.2–1.9% pooled on sets of real
-sessions ([real-session benchmarks](docs/REAL_SESSION_BENCHMARKS.md)).
+Measured with `lcc measure-session` (1.2.0, offline, 38 ms, heuristic token count). **n = 1
+session of mine.** [Run it on yours](#send-us-your-numbers) and post the result.
 
-Install. Requires **Claude Code 2.1.274+** and `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`
-(function hooks are early access):
+In a pre-registered test on 172 real requests ([evidence](docs/EVIDENCE.md)), an agent answering
+from the `stashed` context plus `recall` did as well as with the full context on file recall
+(+0.006, 95% CI −0.023 to +0.034) with 36.6% fewer tokens. It called `recall` for 90% of the
+questions about removed content. A `/compact`-style summary of the same sessions got 73% of exact values
+right (our reimplementation of `/compact`, written by Opus); full and verbatim context got 98%.
 
-```sh
-export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1
-pip install "local-context-compiler[tiktoken]"   # the plugin calls the `lcc` CLI
-claude plugin marketplace add lucasmartins-ai/lcc && claude plugin install lcc@lcc
-```
-
-Allow `mcp__plugin_lcc_lcc__compact_transcript` when asked, or the built-in summary runs. Options,
-fallbacks and limits: [Claude Code guide](docs/CLAUDE_CODE.md).
-
-## Quick start (CLI and MCP)
+## Install
 
 ```sh
 pip install "local-context-compiler[tiktoken]"   # the CLI is `lcc`
-
-lcc compact notes.md -q "what is wrong with the booking flow?" \
-  --provider mechanical -o compacted.md -r report.json
-lcc explain report.json --source notes.md        # why each block was kept or dropped
-
-lcc compact transcript.json -q "finish the parser fix" --mode tool-calls \
-  -o compacted.json -r report.json               # agent transcripts
 ```
+
+**Claude Code plugin** (replaces the `/compact` summary). Function hooks are early access, so
+this needs **Claude Code 2.1.274+ and the flag below**:
+
+```sh
+export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1
+claude plugin marketplace add lucasmartins-ai/lcc
+claude plugin install lcc@lcc --config provider=rules --config rulesMode=stashed
+```
+
+Allow `mcp__plugin_lcc_lcc__recall` so the agent can get removed outputs back. When a pass
+fails or removes too little, the plugin hands over to the built-in summary and says so in a
+toast. Details: [Claude Code guide](docs/CLAUDE_CODE.md).
 
 **MCP** (Claude Code, Cursor, Claude Desktop, any stdio client):
 
@@ -68,17 +64,42 @@ lcc compact transcript.json -q "finish the parser fix" --mode tool-calls \
 {"mcpServers": {"lcc": {"command": "lcc", "args": ["mcp"]}}}
 ```
 
-Tools: `compact`, `compact_transcript`, `inspect`, `prepare`, `explain`, `intake`
+Tools: `compact`, `compact_transcript`, `recall`, `inspect`, `prepare`, `explain`, `intake`
 ([MCP guide](docs/MCP.md)).
 
-**Why lcc**
+**CLI**, on a session file or any document:
 
-- **Local.** The default judges are plain Python on your CPU. The transcript ranker
-  (`specialist-v3`) is a 183 KB file that ships in the package; no network, no external model.
-- **Fast.** A 300-block agent transcript compacts in about 0.2 s; the ranker alone takes about
-  0.1 s ([benchmark](docs/BENCHMARKS.md)).
-- **Auditable.** Kept spans are byte-identical to the source, and every pass writes a JSON
-  report with the reason for each drop.
+```sh
+lcc compact ~/.claude/projects/<project>/<session>.jsonl -q "finish the parser fix" \
+  --mode tool-calls --provider rules --rules-mode stashed -o compacted.json -r report.json
+lcc recall <id>                                   # a removed output, hash-checked
+
+lcc compact notes.md -q "what is wrong with the booking flow?" \
+  --provider mechanical -o compacted.md -r report.json
+lcc explain report.json --source notes.md         # why each block was kept or dropped
+```
+
+## Send us your numbers
+
+```sh
+lcc measure-session ~/.claude/projects/<project>/<session>.jsonl --markdown
+```
+
+It runs every mode on one of your sessions, offline, and prints **counts only**: messages, tool
+calls, tokens before and after, messages kept, time. No text, path or tool output. Paste it in
+[Discussions → Results](https://github.com/lucasmartins-ai/lcc/discussions/categories/results).
+Already compacting with lcc? `lcc share-stats` turns your local reports into the same kind of
+counts-only summary ([SHARE_STATS.md](docs/SHARE_STATS.md)), or use the
+[results issue form](https://github.com/lucasmartins-ai/lcc/issues/new?template=results.yml).
+Every number from someone other than me makes the claims above less mine and more true.
+
+## Why lcc
+
+- **Verbatim.** Kept spans are byte-identical to the source. Nothing is summarized or rewritten.
+- **Recoverable.** `stashed` moves removed outputs to a local content-addressed store
+  (`~/.cache/lcc/stash`); `recall` re-hashes on read.
+- **Auditable.** Every pass writes a JSON report; `lcc explain` gives the reason for every drop.
+- **Local.** The default judges run on your CPU in plain Python. No API key, no network.
 
 ## Providers
 
@@ -100,17 +121,10 @@ check `provider_used` and `degraded` before trusting the output.
 
 ## Benchmarks
 
-**Synthetic transcript A/B** against a reference implementation of the same drop-the-spent-calls
-idea (`fast-jev-compaction`), three sessions, one seed, both scored by the opt-in remote Jev
-judge: lcc removed 13.3 / 39.2 / 55.7% at fact recall 1.00; the reference removed
-70.5 / 78.9 / 83.4% at recall 0.00, losing every evidence pair. In one of four runs lcc also
-dropped an evidence pair on the largest session
-([TRANSCRIPT_AB.md](benchmarks/research/TRANSCRIPT_AB.md)).
-
-**Real sessions, ranker only (held-out, INFERIDO).** A one-shot final test on 193 items from 36
-of the maintainer's sessions that started after the training cutoff. Recall AUC is the share of
-labelled evidence a ranker keeps as it is forced to drop more (0–60% of candidate tokens),
-averaged into one number; all-kept AUC counts an item only when all of its evidence survives.
+**Real sessions (held-out, INFERIDO).** In plain words: when a ranker has to drop part of a
+session, how often does it keep what the agent actually used next? 1.0 would be always. A
+one-shot final test on 193 items from 36 of the maintainer's sessions that started after the
+training cutoff. Retention AUC over drop budgets of 0–60% of candidate tokens:
 
 | ranker | recall AUC | all-kept AUC |
 | --- | ---: | ---: |
@@ -122,8 +136,7 @@ averaged into one number; all-kept AUC counts an item only when all of its evide
 
 The labels are next-action evidence from one maintainer's Claude Code sessions, which favours
 v3's training target. The sessions are private; only aggregates are published
-([SPECIALIST.md](docs/SPECIALIST.md)). Receipts for the real-session numbers live in a private
-repository, so published aggregates are owner-attested until a public dataset exists.
+([SPECIALIST.md](docs/SPECIALIST.md)).
 
 **Synthetic, reproducible** (`python benchmarks/run_judge_bench.py`, about 20 s, no network).
 Nine hand-written edge cases: supersession, contradiction, config change, exception rule,
@@ -140,16 +153,11 @@ pt/en mixed, prompt injection in a tool output, large git diff, old root cause, 
 
 These cases are lexically easy, so the lexical baselines do well; v3 misses the Portuguese
 case. Timings are from macOS arm64 under heavy machine load. Method, every arm and the limits:
-[BENCHMARKS.md](docs/BENCHMARKS.md). Below a 25% gain, the report marks a pass as not worth it.
+[BENCHMARKS.md](docs/BENCHMARKS.md). Rules modes on real sessions:
+[REAL_SESSION_BENCHMARKS.md](docs/REAL_SESSION_BENCHMARKS.md).
 
-## Share your numbers
-
-Ran lcc on your own sessions? Open a
-[results issue](https://github.com/lucasmartins-ai/lcc/issues/new?template=results.yml) with
-counts only: version, provider, tokens before and after, `recall` calls, and whether the agent
-lost anything. `lcc share-stats` prints those counts from your local reports, ready to paste
-([SHARE_STATS.md](docs/SHARE_STATS.md)). Never paste session text. Numbers from other agents and other people's
-workloads are the evidence this project is missing.
+Reduction depends on how much of a context is noise. Below a 25% gain, the report marks the
+pass as not worth it, and the Claude Code plugin keeps the built-in summary.
 
 ## What it does not do
 
@@ -159,7 +167,7 @@ workloads are the evidence this project is missing.
 - Protection rules and bounded restoration reduce, but do not rule out, lost evidence; see the
   [safety model](docs/adr/0014-minimum-sufficient-context.md).
 - `specialist-v3` was trained on Claude Code transcripts. Other agents and plain documents are
-  out of distribution; plain text uses `mechanical` unless a TypeSafe key is configured.
+  out of distribution; plain text uses `mechanical` unless you opt in to Jev.
 
 ## Docs
 
@@ -189,8 +197,7 @@ python benchmarks/run_judge_bench.py --check --out /tmp/judge-bench
 ```
 
 The PyPI package named `lcc` is unrelated; this one is `local-context-compiler`.
-Contributing: [CONTRIBUTING.md](CONTRIBUTING.md), starter tasks in
-[good-first-issues.md](docs/contributing/good-first-issues.md). Security: [SECURITY.md](SECURITY.md).
+Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Security: [SECURITY.md](SECURITY.md).
 Changes: [CHANGELOG.md](CHANGELOG.md).
 
 ## License

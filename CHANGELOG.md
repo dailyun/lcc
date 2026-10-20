@@ -43,11 +43,6 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
-- **`lcc compact --rules-mode`.** The CLI could not pick a `rules_mode` (only MCP and the
-  Python API could), so `lcc recall` had nothing from the CLI to recall. `--rules-mode
-  lossless|recoverable|stashed|lossy` now works with `--mode tool-calls --provider rules`
-  (default `lossless`, unchanged) and is refused anywhere else. The summary table adds a
-  `Rules mode` row with the deduped / replaced / stashed counts.
 - **Edge-case suite for the deterministic core.** These are property tests over a seeded,
   stdlib-only hostile corpus (`tests/edge_corpus.py`) and every local scorer. They cover
   determinism (also across `PYTHONHASHSEED` and locale), verbatim kept bytes, exact report
@@ -194,33 +189,30 @@ All notable changes to this project are documented here. The format is based on
 
 ### Documentation
 
-- **New README hero: `demos/session.gif`.** Rendered from a real run, not mocked: `lcc compact
-  --mode tool-calls --provider rules --rules-mode stashed` on `demos/session.json`, a synthetic
-  50-message Claude Code session debugging a booking API (9,211 -> 6,634 approximate tokens;
-  18 of 18 user and assistant texts byte-identical; five old file reads replaced by `lcc
-  recall` pointers), then `lcc explain` and `lcc recall`. `demos/session_gif.py` renders it
-  deterministically; `demos/make_session.py` writes the input. `compact.gif` stays in
-  `demos/`.
-- **README first screen.** A one-sentence summary, a before/after for Claude Code's `/compact`
-  with the 55,411 → 18,761-token real session and its n=2 caveat (measured with the opt-in Jev
-  judge), the plugin install with its requirements (Claude Code 2.1.274+,
-  `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`), and the pip/MCP quick start. The recall-AUC table
-  moved lower with a plain explanation of the metric, next to a note that real-session
-  aggregates are owner-attested until a public dataset exists. New "Share your numbers"
-  section.
 - **`results` issue form** (`.github/ISSUE_TEMPLATE/results.yml`) for anonymous counts:
   version, provider and mode, agent, tokens before and after, `recall` calls, whether the
   agent lost something. Session text is never asked for. `config.yml` links Discussions and
   the security policy; `.github/FUNDING.yml` added.
-- **MCP Registry:** `server.json` for `io.github.lucasmartins-ai/lcc` (PyPI package, stdio,
-  `lcc mcp`) and the `mcp-name` ownership marker in the README. Not published yet.
 - Draft GitHub Release notes in `docs/release-notes/1.2.0.md`, and five starter issues in
   `docs/contributing/good-first-issues.md`.
 
-## [1.2.0] - 2026-10-19
+## [1.2.0] - 2026-10-20
 
 ### Added
 
+- **`lcc measure-session <session.jsonl>`**: runs `rules:lossless`, `rules:stashed` and `auto`
+  on one Claude Code session, offline, and prints counts only (messages, tool calls, tokens
+  before/after, texts kept, time). `--markdown` is ready to paste into an issue, `--json` is
+  `lcc-session-report/1`. It never writes to the real stash.
+- **`lcc compact --mode tool-calls --rules-mode <mode>`** (with `--provider rules`): the CLI can
+  now select `stashed`, `recoverable` or `lossy`; before, only MCP and Python could.
+- **`lcc compact --mode tool-calls` reads a Claude Code session file (JSONL) directly.**
+- **`server.json`** for the official MCP registry (`io.github.lucasmartins-ai/lcc`), and a
+  `local-context-compiler` console script (same entry point as `lcc`), so
+  `uvx local-context-compiler mcp` starts the server.
+- `demos/stash.gif` and `demos/make_session.py` (a synthetic 91-message session), and
+  [docs/EVIDENCE.md](docs/EVIDENCE.md): the aggregates of the private studies behind the
+  README numbers.
 - **Claude Code plugin: idle stash (opt-in, off by default).** With `idleStash: true`, a
   session resumed after `idleTtlSeconds` of idle has its spent tool outputs stashed
   (`provider: rules`, `rulesMode: stashed`) at `session.start`, before the first request
@@ -239,6 +231,11 @@ All notable changes to this project are documented here. The format is based on
   result (`MAX_MCP_OUTPUT_TOKENS`) and hands a plugin's `$.mcp.call` an error text in place of
   a larger one; a 12-message session with four 10 KB reads already crossed it (49 KB answer).
   The idle stash uses it; the `/compact` path is unchanged.
+
+### Changed
+
+- README: leads with `/compact` vs lcc on a real session, the plugin install with
+  `rulesMode=stashed`, and how to send numbers.
 
 ### Fixed
 
