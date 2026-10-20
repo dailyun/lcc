@@ -1097,6 +1097,7 @@ def _compact_tool_calls(
     raw: str,
     question: str,
     provider: str,
+    rules_mode: str,
     threshold: float,
     trim_head_chars: int,
     preserve_recent: int,
@@ -1147,6 +1148,7 @@ def _compact_tool_calls(
                 payload=payload,
                 question=question,
                 provider=provider,
+                rules_mode=rules_mode,
                 threshold=threshold,
                 preserve_recent=preserve_recent,
                 trim_head_chars=trim_head_chars,
@@ -1207,6 +1209,14 @@ def _compact_tool_calls(
         f"{report['tool_calls_kept']} kept | {report['tool_calls_trimmed']} trimmed | "
         f"{report['tool_calls_dropped']} dropped",
     )
+    if report.get("rules_mode"):
+        replaced = (
+            f"{report['tool_calls_deduped']} deduped | "
+            f"{report['tool_calls_replaced']} replaced"
+        )
+        if report["rules_mode"] == "stashed":
+            replaced += f" ({report['tool_calls_stashed']} stashed; lcc recall <id>)"
+        table.add_row("Rules mode", f"{report['rules_mode']} | {replaced}")
     table.add_row(
         "Messages",
         f"{report['messages_before']} -> {report['messages_after']}",
@@ -1294,6 +1304,15 @@ def compact_command(
             "(local ranker; what auto uses in this mode). Jev and laya (deprecated) run "
             "only when named. "
             "See docs/TOOL_CALLS.md."
+        ),
+    ),
+    rules_mode: str | None = typer.Option(
+        None,
+        "--rules-mode",
+        help=(
+            "tool-calls mode with --provider rules: lossless (default), recoverable, "
+            "stashed (removed outputs kept byte for byte in a local stash; see "
+            "`lcc recall`) or lossy (experimental). See docs/TOOL_CALLS.md."
         ),
     ),
     preserve_recent: int = typer.Option(
@@ -1613,6 +1632,15 @@ def compact_command(
         _fail("--laya-context-limit must be >= 64.", code=2)
     if mode not in ("blocks", "tool-calls"):
         _fail("--mode must be 'blocks' or 'tool-calls'.", code=2)
+    if rules_mode is not None:
+        if mode != "tool-calls" or provider != "rules":
+            _fail("--rules-mode needs --mode tool-calls and --provider rules.", code=2)
+        if rules_mode not in ("lossless", "recoverable", "stashed", "lossy"):
+            _fail(
+                f"unknown --rules-mode {rules_mode!r}; expected lossless, recoverable, "
+                "stashed or lossy.",
+                code=2,
+            )
     if preserve_recent < 0:
         _fail("--preserve-recent must be >= 0.", code=2)
     if max_state_tokens < 64:
@@ -1662,6 +1690,7 @@ def compact_command(
             raw=_read_input(input_path),
             question=question,
             provider=provider,
+            rules_mode=rules_mode or "lossless",
             threshold=threshold,
             trim_head_chars=trim_head_chars,
             preserve_recent=preserve_recent,

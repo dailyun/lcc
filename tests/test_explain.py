@@ -225,3 +225,36 @@ def test_cli_rejects_an_unknown_group_and_a_zero_limit(tmp_path: Path):
 def test_explain_is_registered_in_the_cli():
     listed = runner.invoke(app, ["--help"])
     assert "explain" in listed.output
+
+
+def test_rules_reports_list_replaced_and_deduped_calls():
+    report = {
+        "objective": "fix the parser",
+        "provider_requested": "rules",
+        "provider_used": "rules",
+        "semantic_guarantee": "stashed",
+        "threshold": 0.4,
+        "decisions": [
+            {"id": "c1", "tool": "Read", "message_index": 1, "decision": "replace",
+             "reason": "stashed:superseded_by_later_call:c2", "source": "rules", "chars": 900,
+             "note": "[removed: 210 tokens · lcc recall 0123456789ab]"},
+            {"id": "c2", "tool": "Read", "message_index": 3, "decision": "dedupe",
+             "reason": "identical_output_kept_later", "source": "rules", "chars": 900},
+            {"id": "c3", "tool": "Bash", "message_index": 5, "decision": "keep",
+             "reason": "not_stash_eligible", "source": "rules", "chars": 40},
+        ],
+    }
+    text = render(report)
+    assert "Decisions           1 keep | 0 trim | 0 drop | 1 replace | 1 dedupe" in text
+    assert "REPLACED (1)" in text and "DEDUPED (1)" in text
+    assert "msg 1 Read" in text
+    assert "why: stashed, exact bytes recoverable: a later call (c2) read the same file" in text
+    assert "now: [removed: 210 tokens · lcc recall 0123456789ab]" in text
+    assert "Thresholds" not in text  # rules has no scores
+    only = render(report, only="replace")
+    assert "REPLACED (1)" in only and "KEPT" not in only and "DEDUPED" not in only
+
+
+def test_block_reports_render_without_the_rules_groups():
+    text = render(REPORT)
+    assert "REPLACED" not in text and "DEDUPED" not in text

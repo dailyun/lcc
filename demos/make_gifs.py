@@ -7,8 +7,8 @@ happened to be on screen. This runs the actual commands, captures their actual s
 it into frames. Same input, same GIF, every time, and no tool in the loop that can silently
 produce a blank result.
 
-    python3 demos/make_gifs.py            # all three
-    python3 demos/make_gifs.py compact    # one
+    python3 demos/make_gifs.py            # all four
+    python3 demos/make_gifs.py session    # one (the README hero)
 
 Requires Pillow (system python3 has it) and the repository's own `lcc` on PATH.
 """
@@ -267,7 +267,20 @@ def demo_audio() -> None:
     build("audio-to-prompt", script, "lcc intake — voice transcript to structured prompt")
 
 
-DEMOS = {"compact": demo_compact, "compile": demo_compile, "audio": demo_audio}
+def demo_session() -> None:
+    # The README hero has its own scenes (title and end cards, a transcript view), so it lives
+    # in a sibling module that reuses this file's palette and font.
+    from session_gif import demo_session as render_session
+
+    render_session()
+
+
+DEMOS = {
+    "session": demo_session,
+    "compact": demo_compact,
+    "compile": demo_compile,
+    "audio": demo_audio,
+}
 
 
 def main() -> None:

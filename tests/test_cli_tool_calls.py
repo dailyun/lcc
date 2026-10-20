@@ -247,3 +247,72 @@ def test_the_rules_policy_is_refused_in_blocks_mode(tmp_path: Path):
     result = runner.invoke(app, ["compact", str(src), "-q", "x", "--provider", "rules"])
     assert result.exit_code == 2
     assert "rules" in result.output
+
+
+def _reread_session() -> dict:
+    """The same file read twice: the first read is superseded, so `stashed` removes it."""
+    body = "\n".join(f"{n:>6}→line {n} of the parser module" for n in range(1, 60))
+    messages: list[dict] = [{"role": "user", "text": "fix the parser"}]
+    for n in (1, 2):
+        messages.append({
+            "role": "assistant",
+            "text": f"read {n}",
+            "toolUses": [{"id": f"c{n}", "tool": "Read", "input": {"file_path": "/r/parser.py"}}],
+        })
+        messages.append({"role": "user", "toolResults": [{"id": f"c{n}", "text": body}]})
+    messages.append({"role": "assistant", "text": "done"})
+    return {"messages": messages}
+
+
+def test_rules_mode_stashed_from_the_cli_round_trips_through_recall(tmp_path, monkeypatch):
+    monkeypatch.setenv("LCC_STASH_DIR", str(tmp_path / "stash"))
+    session = _reread_session()
+    src = write(tmp_path, session)
+    out, report = tmp_path / "out.json", tmp_path / "report.json"
+    result = runner.invoke(app, [
+        "compact", str(src), "-q", "fix the parser", "--mode", "tool-calls",
+        "--provider", "rules", "--rules-mode", "stashed", "--preserve-recent", "2",
+        "-o", str(out), "-r", str(report),
+    ])
+    assert result.exit_code == 0, result.output
+    assert "Rules mode" in result.output and "stashed" in result.output
+    data = json.loads(report.read_text(encoding="utf-8"))
+    assert data["rules_mode"] == "stashed" and data["tool_calls_stashed"] == 1
+    pointer = json.loads(out.read_text(encoding="utf-8"))[2]["toolResults"][0]["text"]
+    assert pointer.startswith("[removed: ") and "lcc recall " in pointer
+    stash_id = pointer.rsplit(" ", 1)[1].rstrip("]")
+    recalled = runner.invoke(app, ["recall", stash_id])
+    assert recalled.exit_code == 0, recalled.output
+    assert recalled.output == session["messages"][2]["toolResults"][0]["text"]
+
+    explained = runner.invoke(app, ["explain", str(report), "--only", "replace"])
+    assert explained.exit_code == 0, explained.output
+    assert "REPLACED (1)" in explained.output
+    assert "stashed, exact bytes recoverable" in explained.output
+    assert pointer in explained.output
+
+
+def test_rules_mode_defaults_to_lossless(tmp_path):
+    src = write(tmp_path, _reread_session())
+    report = tmp_path / "report.json"
+    result = runner.invoke(app, [
+        "compact", str(src), "-q", "fix the parser", "--mode", "tool-calls",
+        "--provider", "rules", "--preserve-recent", "1", "-r", str(report), "--dry-run",
+    ])
+    assert result.exit_code == 0, result.output
+    assert json.loads(report.read_text(encoding="utf-8"))["rules_mode"] == "lossless"
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--mode", "tool-calls", "--provider", "auto", "--rules-mode", "stashed"],
+        ["--provider", "mechanical", "--rules-mode", "stashed"],
+        ["--mode", "tool-calls", "--provider", "rules", "--rules-mode", "maybe"],
+    ],
+)
+def test_rules_mode_is_refused_where_it_would_be_ignored_or_unknown(tmp_path, args):
+    src = write(tmp_path)
+    result = runner.invoke(app, ["compact", str(src), "-q", "x", *args])
+    assert result.exit_code == 2
+    assert "--rules-mode" in result.output

@@ -43,6 +43,11 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **`lcc compact --rules-mode`.** The CLI could not pick a `rules_mode` (only MCP and the
+  Python API could), so `lcc recall` had nothing from the CLI to recall. `--rules-mode
+  lossless|recoverable|stashed|lossy` now works with `--mode tool-calls --provider rules`
+  (default `lossless`, unchanged) and is refused anywhere else. The summary table adds a
+  `Rules mode` row with the deduped / replaced / stashed counts.
 - **Edge-case suite for the deterministic core.** These are property tests over a seeded,
   stdlib-only hostile corpus (`tests/edge_corpus.py`) and every local scorer. They cover
   determinism (also across `PYTHONHASHSEED` and locale), verbatim kept bytes, exact report
@@ -141,6 +146,13 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- **`lcc explain` left out `replace` and `dedupe` decisions.** On a `provider: rules` report
+  the outputs that were stashed, re-read pointers or deduped were not listed at all, so the
+  receipt missed exactly the cuts. They now get `REPLACED` / `DEDUPED` groups (only when a
+  report has them; block reports render as before), a count in `Decisions`, the pointer that
+  replaced each output (`now: ...`), plain-language reasons for the rules codes, and
+  `--only replace|dedupe`. Tool-call rows show the message and tool instead of `lines ?-?`,
+  and the meaningless `Thresholds` row is dropped for `rules`.
 - `mypy` passes with and without `tiktoken` installed (no unused `type: ignore`).
 
 - Boilerplate removal deleted `----`, `Page 3 of 10`, `On … wrote:` and similar lines inside
@@ -182,6 +194,13 @@ All notable changes to this project are documented here. The format is based on
 
 ### Documentation
 
+- **New README hero: `demos/session.gif`.** Rendered from a real run, not mocked: `lcc compact
+  --mode tool-calls --provider rules --rules-mode stashed` on `demos/session.json`, a synthetic
+  50-message Claude Code session debugging a booking API (9,211 -> 6,634 approximate tokens;
+  18 of 18 user and assistant texts byte-identical; five old file reads replaced by `lcc
+  recall` pointers), then `lcc explain` and `lcc recall`. `demos/session_gif.py` renders it
+  deterministically; `demos/make_session.py` writes the input. `compact.gif` stays in
+  `demos/`.
 - **README first screen.** A one-sentence summary, a before/after for Claude Code's `/compact`
   with the 55,411 → 18,761-token real session and its n=2 caveat (measured with the opt-in Jev
   judge), the plugin install with its requirements (Claude Code 2.1.274+,

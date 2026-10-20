@@ -104,7 +104,8 @@ is a semantic question, and a lexical scorer cannot answer it honestly. Use `--p
 
 ### Offline policy: `--provider rules`
 
-No key, no model, no network. Four modes (`rules_mode`, MCP argument / Python API):
+No key, no model, no network. Four modes (`rules_mode`, MCP argument / Python API;
+`--rules-mode` on the CLI):
 
 **`lossless` (default)** — `src/lcc/relevance/transcript_lossless.py`. A tool result is
 replaced by a pointer to a later result that is kept unchanged and has the same `is_error`
@@ -176,9 +177,12 @@ Each decision is `replace` with reason `stashed:<rule that made it eligible>` an
 (present, hash matches, bytes equal the original); a violation keeps everything. A blob that
 cannot be written keeps its result (`stash_write_failed:<error>`).
 
-Getting a result back re-hashes the blob and refuses one that fails:
+From the CLI. Getting a result back re-hashes the blob and refuses one that fails:
 
 ```bash
+lcc compact session.json -q "fix the booking KeyError" --mode tool-calls \
+  --provider rules --rules-mode stashed -o compacted.json -r report.json
+lcc explain report.json --only replace   # each removed output, its rule and its pointer
 lcc recall 3f9a1c0b2d4e               # whole output; 12-64 hex chars of the sha256
 lcc recall 3f9a1c0b2d4e --lines 40-80 # 1-based, inclusive
 ```
@@ -223,7 +227,9 @@ only, never to Read/Grep of source.
 
 ## 6. CLI options
 
-Honored: `--question`, `--provider jev|laya|auto|rules|specialist-v3`, `--threshold`, `--trim-head-chars`,
+Honored: `--question`, `--provider jev|laya|auto|rules|specialist-v3`,
+`--rules-mode lossless|recoverable|stashed|lossy` (with `--provider rules` only; refused
+elsewhere), `--threshold`, `--trim-head-chars`,
 `--preserve-recent`, `--max-state-tokens`, `--max-request-tokens`, `--batch-size`,
 `--max-workers`, `--min-reduction` (sets `worth_it`), `--model` (token counting),
 `--jev-model`, `-o/--output`, `-r/--report`, `--dry-run`.

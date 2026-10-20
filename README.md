@@ -10,7 +10,7 @@
 [![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/lucasmartins-ai/lcc?style=social)](https://github.com/lucasmartins-ai/lcc/stargazers)
 
-<img src="https://raw.githubusercontent.com/lucasmartins-ai/lcc/main/demos/compact.gif" alt="lcc compact dropping noise from a 23-block dossier, then lcc explain showing why each block went" width="820">
+<img src="https://raw.githubusercontent.com/lucasmartins-ai/lcc/main/demos/session.gif" alt="lcc compacting a 50-message Claude Code debugging session offline with --provider rules --rules-mode stashed: 9,211 to 6,634 tokens, every user and assistant message byte-identical, five old file reads replaced by lcc recall pointers, lcc explain listing why each one went, and lcc recall returning a removed output byte for byte" width="900">
 
 </div>
 
