@@ -26,11 +26,11 @@ is kept as it was.
 
 | One real Claude Code session (193 messages, 75 tool calls) | tokens | user and assistant messages | removed tool outputs |
 | --- | ---: | --- | --- |
-| before | 45,435 | 43, as written | — |
+| before | 57,083 | 43, as written | — |
 | `/compact` | one summary | rewritten into the summary | gone |
-| **lcc** (`rules`, `stashed`) | **21,397 (−52.9%)** | **43 / 43 byte for byte** | 33, each one `recall` away |
+| **lcc** (`rules`, `stashed`) | **28,807 (−49.5%)** | **43 / 43 byte for byte** | 33, each one `recall` away |
 
-Measured with `lcc measure-session` (1.2.0, offline, 38 ms, heuristic token count). **n = 1
+Measured with `lcc measure-session` (1.2.0, offline, exact `o200k_base` token count). **n = 1
 session of mine.** [Run it on yours](#send-us-your-numbers) and post the result.
 
 In a pre-registered test on 172 real requests ([evidence](docs/EVIDENCE.md)), an agent answering
