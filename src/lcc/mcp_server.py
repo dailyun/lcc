@@ -23,6 +23,7 @@ Run: ``lcc mcp`` (stdio) or ``python -m lcc.mcp_server``.
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from typing import Any
 
@@ -31,7 +32,21 @@ from lcc import __version__
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "lcc"
 
-__all__ = ["PROTOCOL_VERSION", "TOOLS", "handle_message", "serve_forever"]
+__all__ = ["PROTOCOL_VERSION", "TOOLS", "ToolInputError", "handle_message", "serve_forever"]
+
+LOGGER = logging.getLogger("lcc.mcp")
+
+
+class ToolInputError(ValueError):
+    """A tool argument the handler rejected on purpose; its text is safe to show any caller."""
+
+
+def _number(args: dict[str, Any], key: str, default: float, kind: type = float) -> Any:
+    """``args[key]`` as ``kind``; a fixed message, never the conversion's own text."""
+    try:
+        return kind(args.get(key, default))
+    except (TypeError, ValueError, OverflowError):  # OverflowError: int(Infinity)
+        raise ToolInputError(f"{key!r} must be a number") from None
 
 
 def _tool_compact(args: dict[str, Any]) -> dict[str, Any]:
@@ -44,15 +59,15 @@ def _tool_compact(args: dict[str, Any]) -> dict[str, Any]:
     text = args.get("text", "")
     question = args.get("question", "")
     if not isinstance(text, str) or not text.strip():
-        raise ValueError("compact requires non-empty 'text'")
+        raise ToolInputError("compact requires non-empty 'text'")
     if not isinstance(question, str) or not question.strip():
-        raise ValueError("compact requires non-empty 'question'")
+        raise ToolInputError("compact requires non-empty 'question'")
     provider = args.get("provider", "mechanical")
     if provider not in ("auto", "jev", "laya", "mechanical"):
-        raise ValueError("provider must be auto, jev, laya, or mechanical")
-    threshold = float(args.get("threshold", 0.4))
+        raise ToolInputError("provider must be auto, jev, laya, or mechanical")
+    threshold = _number(args, "threshold", 0.4)
     if not 0.0 <= threshold <= 1.0:
-        raise ValueError("threshold must be between 0 and 1")
+        raise ToolInputError("threshold must be between 0 and 1")
     result = compact_context(
         RelevanceCompactionRequest(
             text=text,
@@ -74,26 +89,28 @@ def _tool_compact_transcript(args: dict[str, Any]) -> dict[str, Any]:
 
     payload = args.get("messages") if "messages" in args else args.get("payload")
     if not isinstance(payload, (list, dict)) or not payload:
-        raise ValueError("compact_transcript requires 'messages' (a list or {'messages': [...]})")
+        raise ToolInputError(
+            "compact_transcript requires 'messages' (a list or {'messages': [...]})"
+        )
     question = args.get("question", "")
     if not isinstance(question, str) or not question.strip():
-        raise ValueError("compact_transcript requires non-empty 'question'")
+        raise ToolInputError("compact_transcript requires non-empty 'question'")
     provider = args.get("provider", "auto")
     if provider not in ("auto", "jev", "laya", "rules", "specialist-v3"):
-        raise ValueError(
+        raise ToolInputError(
             "compact_transcript needs a semantic judge or the rules policy: use 'laya' "
             "(local, offline), 'jev', 'auto', 'rules' (offline deterministic policy) or "
             "'specialist-v3' (offline local ranker) — "
             "'mechanical' scores lexical overlap, which cannot say whether a tool's work "
             "is finished"
         )
-    threshold = float(args.get("threshold", 0.5))
+    threshold = _number(args, "threshold", 0.5)
     if not 0.0 <= threshold <= 1.0:
-        raise ValueError("threshold must be between 0 and 1")
-    preserve_recent = int(args.get("preserve_recent", 6))
-    trim_head_chars = int(args.get("trim_head_chars", 300))
+        raise ToolInputError("threshold must be between 0 and 1")
+    preserve_recent = _number(args, "preserve_recent", 6, int)
+    trim_head_chars = _number(args, "trim_head_chars", 300, int)
     if preserve_recent < 0 or trim_head_chars < 0:
-        raise ValueError("preserve_recent and trim_head_chars must be >= 0")
+        raise ToolInputError("preserve_recent and trim_head_chars must be >= 0")
     request_payload = payload if isinstance(payload, dict) else {"messages": payload}
     result = compact_transcript(
         TranscriptCompactionRequest(
@@ -103,10 +120,10 @@ def _tool_compact_transcript(args: dict[str, Any]) -> dict[str, Any]:
             threshold=threshold,
             preserve_recent=preserve_recent,
             trim_head_chars=trim_head_chars,
-            max_state_tokens=int(args.get("max_state_tokens", 25000)),
-            max_request_tokens=int(args.get("max_request_tokens", 30000)),
-            max_workers=int(args.get("max_workers", 4)),
-            min_reduction=float(args.get("min_reduction", 0.25)),
+            max_state_tokens=_number(args, "max_state_tokens", 25000, int),
+            max_request_tokens=_number(args, "max_request_tokens", 30000, int),
+            max_workers=_number(args, "max_workers", 4, int),
+            min_reduction=_number(args, "min_reduction", 0.25),
             laya_model=args.get("laya_model"),
             jev_model=str(args.get("jev_model", "jev-latest")),
             rules_mode=str(args.get("rules_mode", "lossless")),
@@ -256,7 +273,7 @@ def _tool_inspect(args: dict[str, Any]) -> dict[str, Any]:
 
     text = args.get("text", "")
     if not isinstance(text, str) or not text.strip():
-        raise ValueError("inspect requires non-empty 'text'")
+        raise ToolInputError("inspect requires non-empty 'text'")
     report = run_inspection(InspectionRequest(raw_text=text))
     return {"report": _json.loads(inspection_to_json(report))}
 
@@ -273,7 +290,7 @@ def _tool_prepare(args: dict[str, Any]) -> dict[str, Any]:
 
     text = args.get("text", "")
     if not isinstance(text, str) or not text.strip():
-        raise ValueError("prepare requires non-empty 'text'")
+        raise ToolInputError("prepare requires non-empty 'text'")
     question = args.get("question", "") or ""
     inspection_report = run_inspection(InspectionRequest(raw_text=text))
     action = inspection_report.recommendation.action
@@ -304,13 +321,16 @@ def _tool_explain(args: dict[str, Any]) -> dict[str, Any]:
 
     report = args.get("report")
     if isinstance(report, str):
-        report = json.loads(report)
+        try:
+            report = json.loads(report)
+        except ValueError:
+            raise ToolInputError("'report' must be a JSON object") from None
     if not isinstance(report, dict) or "decisions" not in report:
-        raise ValueError("explain requires a 'report' compaction-report object")
+        raise ToolInputError("explain requires a 'report' compaction-report object")
     only = args.get("only")
     limit = args.get("limit")
     if limit is not None:
-        limit = int(limit)
+        limit = _number(args, "limit", 0, int)
     return {
         "explanation": render(
             report,
@@ -326,7 +346,7 @@ def _tool_intake(args: dict[str, Any]) -> dict[str, Any]:
 
     text = args.get("text", "")
     if not isinstance(text, str) or not text.strip():
-        raise ValueError("intake requires non-empty 'text'")
+        raise ToolInputError("intake requires non-empty 'text'")
     question = args.get("question", "") or ""
     result = LccIntake().process(raw_input=text, question=question)
     return {
@@ -344,7 +364,7 @@ def _tool_recall(args: dict[str, Any]) -> dict[str, Any]:
 
     stash_id = args.get("id", "")
     if not isinstance(stash_id, str):
-        raise ValueError("recall requires 'id' (the hex id after 'lcc recall' in the pointer)")
+        raise ToolInputError("recall requires 'id' (the hex id after 'lcc recall' in the pointer)")
     lines = args.get("lines")
     span = parse_lines(lines) if isinstance(lines, str) and lines else None
     return {"sha256": recall_sha256(stash_id), "text": recall(stash_id, span)}
@@ -594,12 +614,18 @@ def _error(request_id: Any, code: int, message: str) -> dict[str, Any]:
 def _cache_state_arg(value: Any) -> str:
     state = str(value or "unknown")
     if state not in ("warm", "cold", "unknown"):
-        raise ValueError(f"cache_state must be warm, cold or unknown, got {state!r}")
+        raise ToolInputError(f"cache_state must be warm, cold or unknown, got {state!r}")
     return state
 
 
-def handle_message(message: dict[str, Any]) -> dict[str, Any] | None:
-    """Handle one JSON-RPC message; return the response, or None for notifications."""
+def handle_message(
+    message: dict[str, Any], *, echo_errors: bool = True
+) -> dict[str, Any] | None:
+    """Handle one JSON-RPC message; return the response, or None for notifications.
+
+    ``echo_errors=False`` (HTTP) shows only ``ToolInputError`` text; any other failure
+    answers with its type and is logged, since its text may carry a server path.
+    """
     if not isinstance(message, dict):  # batches are not supported by MCP
         return _error(None, -32600, "invalid request: expected a JSON object")
     method = message.get("method", "")
@@ -630,13 +656,15 @@ def handle_message(message: dict[str, Any]) -> dict[str, Any] | None:
         try:
             output = spec["handler"](arguments)
         except (ValueError, KeyError, TypeError) as exc:
-            return _result(
-                request_id,
-                {
-                    "content": [{"type": "text", "text": f"error: {exc}"}],
-                    "isError": True,
-                },
-            )
+            if echo_errors or isinstance(exc, ToolInputError):
+                text = f"error: {exc}"
+            else:
+                # Bad input is the caller's; a traceback is only worth it for a likely bug.
+                log = LOGGER.warning if isinstance(exc, ValueError) else LOGGER.exception
+                log("tool %s failed: %s", name, type(exc).__name__)
+                text = f"error: tool call failed ({type(exc).__name__})"
+            return _result(request_id, {"content": [{"type": "text", "text": text}],
+                                        "isError": True})
         # Opt-in (LCC_REQUEST_LOG=1): logs the redacted goal only, after the output exists.
         from lcc.request_log import log_request
 

@@ -68,7 +68,7 @@ def test_disk_check_is_an_oracle_locally_so_http_must_refuse_it(tmp_path, monkey
 
 
 def test_http_errors_never_echo_exception_text(monkeypatch):
-    def boom(_message):
+    def boom(_message, **_):
         raise RuntimeError("contents of /etc/shadow")
 
     monkeypatch.setattr(chatgpt_server, "handle_message", boom)
@@ -80,7 +80,7 @@ def test_http_errors_never_echo_exception_text(monkeypatch):
 def test_http_transcript_shape_errors_keep_their_reason(monkeypatch):
     from lcc.relevance.transcript import TranscriptError
 
-    def shape_error(_message):
+    def shape_error(_message, **_):
         raise TranscriptError("message 0 has text under 'content'")
 
     monkeypatch.setattr(chatgpt_server, "handle_message", shape_error)
@@ -218,6 +218,58 @@ def test_http_rejects_deeply_nested_json():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def _http_tool_text(arguments, tool="compact"):
+    response, _ = chatgpt_server._handle(
+        {"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+         "params": {"name": tool, "arguments": arguments}})
+    assert response is not None and response["result"]["isError"] is True
+    return response["result"]["content"][0]["text"]
+
+
+@pytest.mark.parametrize("exc", [ValueError, KeyError, TypeError])
+def test_http_tool_errors_never_echo_exception_text(exc, monkeypatch):
+    def broken(_args):
+        raise exc("/srv/secret/path")
+
+    monkeypatch.setitem(mcp_server.TOOLS["compact"], "handler", broken)
+    assert _http_tool_text({}) == f"error: tool call failed ({exc.__name__})"
+
+
+@pytest.mark.parametrize("threshold", ["abc", [1]])
+def test_http_bad_numbers_answer_a_fixed_message(threshold):
+    text = _http_tool_text({"text": "y", "question": "x", "threshold": threshold})
+    assert text == "error: 'threshold' must be a number"
+
+
+def test_http_infinite_int_answers_a_fixed_message():
+    arguments = {"messages": [{"role": "user", "content": "hi"}], "question": "x",
+                 "provider": "rules", "preserve_recent": float("inf")}
+    text = _http_tool_text(arguments, tool="compact_transcript")
+    assert text == "error: 'preserve_recent' must be a number"
+
+
+def test_http_explain_bad_json_answers_a_fixed_message():
+    assert _http_tool_text({"report": "{not json"}, tool="explain") == (
+        "error: 'report' must be a JSON object")
+
+
+def test_http_tool_input_errors_keep_their_reason():
+    assert _http_tool_text({"text": "", "question": "x"}) == (
+        "error: compact requires non-empty 'text'")
+
+
+def test_stdio_tool_errors_keep_their_text(monkeypatch):
+    def broken(_args):
+        raise ValueError("/srv/secret/path")
+
+    monkeypatch.setitem(mcp_server.TOOLS["compact"], "handler", broken)
+    response = mcp_server.handle_message(
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "compact", "arguments": {}}})
+    assert response is not None
+    assert response["result"]["content"][0]["text"] == "error: /srv/secret/path"
 
 
 # -- 4. regex / quadratic denial of service -------------------------------------------------
