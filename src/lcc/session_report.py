@@ -53,21 +53,31 @@ def from_claude_code(path: Path) -> list[dict[str, Any]]:
         return messages_from_jsonl(handle)
 
 
-def _codex_message(item: dict[str, Any]) -> dict[str, Any] | None:
+def _codex_message(item: dict[str, Any], record_index: int) -> dict[str, Any] | None:
     kind = item.get("type")
     if kind == "message" and item.get("role") in ("user", "assistant"):
         return {"role": item["role"], "text": _result_text(item.get("content"))}
     call_id = item.get("call_id")
-    if kind == "local_shell_call":
-        call_id = call_id or item.get("id")  # Legacy rollouts used id instead of call_id.
+    if kind in ("local_shell_call", "web_search_call"):
+        call_id = call_id or item.get("id")  # Native search and legacy shell use item ids.
+    if kind == "web_search_call" and (not isinstance(call_id, str) or not call_id):
+        # The native provider may omit its id, even though the search still occurred.
+        call_id = f"codex-web-search-{record_index}"
     if not isinstance(call_id, str) or not call_id:
         return None
-    if kind in ("function_call", "custom_tool_call", "local_shell_call"):
-        tool = "local_shell" if kind == "local_shell_call" else item.get("name")
+    if kind in ("function_call", "custom_tool_call", "local_shell_call", "web_search_call"):
+        tool = {
+            "local_shell_call": "local_shell",
+            "web_search_call": "web_search",
+        }.get(kind, item.get("name"))
         if not isinstance(tool, str) or not tool:
             return None
         namespace = item.get("namespace")
-        if kind != "local_shell_call" and isinstance(namespace, str) and namespace.strip():
+        if (
+            kind in ("function_call", "custom_tool_call")
+            and isinstance(namespace, str)
+            and namespace.strip()
+        ):
             tool = f"{namespace}.{tool}"
         if kind == "function_call":
             raw_input = item.get("arguments", "")
@@ -79,6 +89,9 @@ def _codex_message(item: dict[str, Any]) -> dict[str, Any] | None:
                 tool_input = {"arguments": tool_input}
         elif kind == "custom_tool_call":
             tool_input = {"input": item.get("input", "")}
+        elif kind == "web_search_call":
+            action = item.get("action")
+            tool_input = action if isinstance(action, dict) else {}
         else:
             tool_input = item.get("action")
             if not isinstance(tool_input, dict):
@@ -110,7 +123,7 @@ def messages_from_jsonl(lines: Any) -> list[dict[str, Any]]:
     """
     messages: list[dict[str, Any]] = []
     codex: bool | None = None
-    for line in lines:
+    for record_index, line in enumerate(lines):
         try:
             record = json.loads(line)
         except json.JSONDecodeError:
@@ -122,7 +135,7 @@ def messages_from_jsonl(lines: Any) -> list[dict[str, Any]]:
         if codex:
             item = record.get("payload")
             if record.get("type") == "response_item" and isinstance(item, dict):
-                codex_entry = _codex_message(item)
+                codex_entry = _codex_message(item, record_index)
                 if codex_entry is not None:
                     messages.append(codex_entry)
             continue

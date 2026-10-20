@@ -260,3 +260,72 @@ def test_compact_tool_calls_also_accepts_a_codex_rollout(tmp_path: Path, monkeyp
     )
     assert result.exit_code == 0, result.output
     assert json.loads(output.read_text())[0] == {"role": "user", "text": USER_TEXT}
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        {"type": "search", "query": "synthetic query"},
+        {"type": "search", "queries": ["first query", "second query"]},
+        {"type": "open_page", "url": "https://example.invalid"},
+        {"type": "find_in_page", "url": "https://example.invalid", "pattern": "synthetic"},
+        None,
+    ],
+)
+def test_native_web_search_keeps_provider_id_and_action(action):
+    rows = [
+        {"type": "session_meta"},
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "web_search_call",
+                "id": "ws-synthetic",
+                "status": "completed",
+                "action": action,
+            },
+        },
+    ]
+    messages = messages_from_jsonl(json.dumps(row) for row in rows)
+    assert len(messages) == 1
+    assert messages[0]["toolUses"] == [
+        {
+            "tool_use_id": "ws-synthetic",
+            "tool": "web_search",
+            "input": action or {},
+        }
+    ]
+
+
+def test_native_web_search_without_provider_ids_is_not_dropped():
+    rows = [
+        {"type": "session_meta"},
+        {"type": "response_item", "payload": {"type": "web_search_call"}},
+        {"type": "response_item", "payload": {"type": "web_search_call"}},
+    ]
+    lines = [json.dumps(row) for row in rows]
+    first = messages_from_jsonl(lines)
+    assert len(first) == 2
+    assert first == messages_from_jsonl(lines)
+    assert len({message["toolUses"][0]["tool_use_id"] for message in first}) == 2
+
+
+def test_cli_counts_native_web_search_without_exposing_the_query(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("LCC_DISABLE_NETWORK", "1")
+    path = tmp_path / "web-rollout.jsonl"
+    rows = [
+        {"type": "session_meta"},
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "web_search_call",
+                "id": "ws-synthetic",
+                "action": {"type": "search", "query": PRIVATE},
+            },
+        },
+    ]
+    path.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+    result = CliRunner().invoke(app, ["measure-session", str(path), "--json"])
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.output)
+    assert report["tool_calls"] == 1 and report["tokens_before"] > 0
+    assert PRIVATE not in result.output
