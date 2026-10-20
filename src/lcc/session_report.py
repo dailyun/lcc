@@ -1,10 +1,10 @@
 """`lcc measure-session`: what each compaction mode would do to one of your sessions.
 
-Reads a Claude Code session file (JSONL) locally, runs the tool-call compaction modes offline
-and reports **counts only**: messages, tool calls, tokens before and after, user/assistant texts
-kept byte for byte, time. No session text, path or tool output is in the report, so it can be
-pasted into a public issue. Nothing is sent anywhere; `stashed` writes to a temporary stash that
-is deleted afterwards.
+Reads a Claude Code session or Codex rollout file (JSONL) locally and runs tool-call
+compaction offline. Reports **counts only**: messages, tool calls, tokens before and after,
+user/assistant texts kept byte for byte, and time. No session text, path or tool output is
+in the report, so it can be pasted into a public issue. Nothing is sent anywhere;
+`stashed` writes to a temporary stash that is deleted afterwards.
 """
 
 from __future__ import annotations
@@ -33,31 +33,98 @@ def _result_text(content: Any) -> str:
         return json.dumps(content, ensure_ascii=False) if content else ""
     parts = []
     for block in content:
-        if isinstance(block, dict) and block.get("type") == "text":
+        if isinstance(block, dict) and block.get("type") in ("text", "input_text", "output_text"):
             parts.append(str(block.get("text") or ""))
-        elif isinstance(block, dict) and block.get("type") == "image":
+        elif isinstance(block, dict) and block.get("type") in ("image", "input_image"):
             parts.append("[image]")
+        elif isinstance(block, dict) and block.get("type") == "input_audio":
+            parts.append("[audio]")
         elif isinstance(block, str):
             parts.append(block)
     return "\n".join(parts)
 
 
 def from_claude_code(path: Path) -> list[dict[str, Any]]:
-    """Claude Code JSONL -> the message shape the plugin hook receives (thinking blocks and
-    results whose call is not in the file are left out, as the hook never sees them)."""
+    """Read Claude Code JSONL or an auto-detected Codex rollout into hook-shaped messages.
+
+    The historical name is retained for callers. Reasoning and orphaned results are omitted.
+    """
     with path.open(encoding="utf-8", errors="replace") as handle:
         return messages_from_jsonl(handle)
 
 
+def _codex_message(item: dict[str, Any]) -> dict[str, Any] | None:
+    kind = item.get("type")
+    if kind == "message" and item.get("role") in ("user", "assistant"):
+        return {"role": item["role"], "text": _result_text(item.get("content"))}
+    call_id = item.get("call_id")
+    if kind == "local_shell_call":
+        call_id = call_id or item.get("id")  # Legacy rollouts used id instead of call_id.
+    if not isinstance(call_id, str) or not call_id:
+        return None
+    if kind in ("function_call", "custom_tool_call", "local_shell_call"):
+        tool = "local_shell" if kind == "local_shell_call" else item.get("name")
+        if not isinstance(tool, str) or not tool:
+            return None
+        namespace = item.get("namespace")
+        if kind != "local_shell_call" and isinstance(namespace, str) and namespace.strip():
+            tool = f"{namespace}.{tool}"
+        if kind == "function_call":
+            raw_input = item.get("arguments", "")
+            try:
+                tool_input = json.loads(raw_input)
+            except (json.JSONDecodeError, TypeError):
+                tool_input = raw_input
+            if not isinstance(tool_input, dict):
+                tool_input = {"arguments": tool_input}
+        elif kind == "custom_tool_call":
+            tool_input = {"input": item.get("input", "")}
+        else:
+            tool_input = item.get("action")
+            if not isinstance(tool_input, dict):
+                return None
+        return {
+            "role": "assistant",
+            "text": "",
+            "toolUses": [
+                {
+                    "tool_use_id": call_id,
+                    "tool": tool,
+                    "input": tool_input,
+                }
+            ],
+        }
+    if kind in ("function_call_output", "custom_tool_call_output"):
+        return {
+            "role": "user",
+            "text": "",
+            "toolResults": [{"tool_use_id": call_id, "text": _result_text(item.get("output"))}],
+        }
+    return None
+
+
 def messages_from_jsonl(lines: Any) -> list[dict[str, Any]]:
-    """Same as :func:`from_claude_code`, over the file's lines."""
+    """Read session lines, detecting Codex by a first ``session_meta`` record.
+
+    Codex response items are canonical; event_msg entries duplicate their text and are ignored.
+    """
     messages: list[dict[str, Any]] = []
+    codex: bool | None = None
     for line in lines:
         try:
             record = json.loads(line)
         except json.JSONDecodeError:
             continue
         if not isinstance(record, dict):
+            continue
+        if codex is None:
+            codex = record.get("type") == "session_meta"
+        if codex:
+            item = record.get("payload")
+            if record.get("type") == "response_item" and isinstance(item, dict):
+                codex_entry = _codex_message(item)
+                if codex_entry is not None:
+                    messages.append(codex_entry)
             continue
         message = record.get("message")
         if record.get("type") not in ("user", "assistant") or not isinstance(message, dict):
