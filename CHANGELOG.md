@@ -49,6 +49,9 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- `lcc measure-session --question/-q` passes a specific question or objective to every
+  compaction mode, retaining the previous default when omitted (#61).
+
 - **`lcc measure-session` reads Codex CLI rollouts** (#67, thanks @dailyun). The format is
   detected from the first `session_meta` record; messages and paired tool calls/results,
   including native web search, map into the existing report shape.
