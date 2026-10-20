@@ -17,7 +17,7 @@ import json
 import re
 import xml.etree.ElementTree as ET
 
-TRIM_POLICY_VERSION = "trim-1.2"
+TRIM_POLICY_VERSION = "trim-1.3"
 
 #: Lines end at ``\n``, ``\r\n`` or ``\r`` only, and keep their terminator, so a row- or
 #: line-aware trim re-emits the block's own bytes (``str.splitlines`` + ``"\n".join`` turned
@@ -27,6 +27,7 @@ _RAW_LINE_RE = re.compile(r"[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+")
 
 def _raw_lines(text: str) -> list[str]:
     return [line for line in _RAW_LINE_RE.findall(text) if line]
+
 
 #: Semantic-scope qualifiers: cutting before one of these can invert the surviving
 #: claim ("safe for adults" vs "safe for adults, except when..."). Any trim that
@@ -212,9 +213,7 @@ def trim_block_safe(
         lines = _raw_lines(text)
         try:
             delim_idx = next(
-                i
-                for i, line in enumerate(lines)
-                if _TABLE_DELIM_RE.match(line.rstrip("\r\n"))
+                i for i, line in enumerate(lines) if _TABLE_DELIM_RE.match(line.rstrip("\r\n"))
             )
         except StopIteration:
             return text, False, ctype
@@ -249,7 +248,8 @@ def trim_block_safe(
         head_text, tail_text = head_text.rstrip(), tail_text.lstrip()
         if not head_text or not tail_text.strip():
             return text, False, ctype
-        combined = head_text + "\n" + tail_text
+        line_ending = "\r\n" if "\r\n" in text else "\n"
+        combined = head_text + line_ending + tail_text
         if len(combined) >= len(text):
             return text, False, ctype
         return combined, True, ctype

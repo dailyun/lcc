@@ -21,7 +21,9 @@ def test_prose_trims_at_word_boundary():
 
 
 def test_logs_prefer_head_tail():
-    lines = [f"2026-01-0{(i % 9) + 1} 10:00:0{i % 10} INFO event number {i} happened" for i in range(60)]
+    lines = [
+        f"2026-01-0{(i % 9) + 1} 10:00:0{i % 10} INFO event number {i} happened" for i in range(60)
+    ]
     text = "\n".join(lines)
     assert detect_content_type(text) == "logs"
     head, ok, _ = trim_block_safe(text, 600)
@@ -114,3 +116,18 @@ def test_unicode_and_emoji_survive_trim():
     head, ok, _ = trim_block_safe(text, 300)
     assert ok
     head.encode("utf-8")  # no broken surrogates
+
+
+@pytest.mark.parametrize("eol", ["\n", "\r\n"])
+@pytest.mark.parametrize("trailing_eol", [False, True])
+def test_log_head_tail_join_preserves_line_endings(eol, trailing_eol):
+    lines = [f"2026-01-01 10:00:00 INFO synthetic event {i:03d} completed" for i in range(60)]
+    text = eol.join(lines) + (eol if trailing_eol else "")
+    rendered, ok, ctype = trim_block_safe(text, 600)
+    assert ok and ctype == "logs"
+    assert lines[0] in rendered
+    assert lines[-1] in rendered
+    if eol == "\r\n":
+        assert "\n" not in rendered.replace("\r\n", "")
+    else:
+        assert "\r" not in rendered
