@@ -17,7 +17,7 @@ when named (`provider="laya"`); no automatic or fallback path selects either.
 | Request | Provider used |
 | --- | --- |
 | `provider="auto"` with `segments`, no decision cache | `specialist-v3`, `degraded: false` (Jev is not even resolved) |
-| `provider="auto"`, plain text | Jev when available, else `mechanical` (unchanged; never Laya) |
+| `provider="auto"`, plain text | `mechanical` (local; Jev only with `LCC_AUTO_REMOTE=1` and a key; never Laya) |
 | `provider="specialist-v3"` with `segments` | `specialist-v3` |
 | `provider="specialist-v3"` without `segments` | `specialist-v3`, with warning `specialist_v3_no_block_metadata` (every block has unknown role/kind/tool, which the model never saw in training) |
 | `provider="jev"` / `provider="laya"` | that judge, as before (opt-in) |
@@ -120,12 +120,13 @@ version read them from header lines, which is why this was a requirement before 
 
 ## Drop policy
 
-1. LCC's protection runs first and is unchanged: short blocks, `keep_patterns`, the protected
-   prefix, `preserve_tail_blocks` and standalone-instruction sanitizing. Only blocks that
-   survive it are candidates.
+1. LCC's protection runs first: short blocks, `keep_patterns`, the protected prefix,
+   `preserve_tail_blocks`, standalone-instruction sanitizing and, when segments are given, the
+   latest user message (`latest_user_message`). Only blocks that survive it are candidates.
 2. v3 scores the whole context in order (position and neighbours are features).
 3. Candidates with a deterministic-protection reason (quoted speech, other-language evidence
-   and the other rules of the mechanical safety net) and `high_risk` content are never dropped.
+   and the other rules of the mechanical safety net), `high_risk` content and the rule-floor
+   blocks below (`specialist_floor`) are never dropped, at any `specialist_drop_fraction`.
 4. The rest are dropped lowest score first (ties: older first) until `specialist_drop_fraction`
    of the candidate characters is removed. Identical texts share one decision.
 
@@ -140,7 +141,11 @@ context and a content-keyed sticky decision would be wrong.
   duplicates, errors, LCC's own mechanical overlap and protection flag), averaged, minus
   0.5 × log(chars).
 - Rule floor: +3.0 for the block with the highest BM25 match to the goal and the 2 most recent
-  blocks with an error marker.
+  blocks with an error marker. The compactor also treats these blocks as never droppable: the
+  bonus alone does not survive a large drop fraction.
+- The "LCC mechanical overlap" feature is computed with the training-time ASCII tokenization
+  (`fold=False`), although the mechanical scorer itself is now accent-insensitive
+  (`fold_accents`), so the model's input does not drift.
 - `src/lcc/relevance/specialist_v3.json` holds numbers, the feature names and member tags only.
   A test checks that no other string is in it. Its sha256 is pinned in `specialist.py`.
 - Trained on the maintainer's own agent sessions with next-action labels (which blocks the

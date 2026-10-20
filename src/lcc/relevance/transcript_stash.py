@@ -142,10 +142,16 @@ def stashed_decisions(
         if base["decision"] == "dedupe" or call.id in duplicated:
             decisions.append(base)
             continue
+        text = call.result.text
+        if _NOTE.match(text):
+            # Already a stash pointer (an earlier pass): stashing it again would replace the
+            # pointer with a pointer to the pointer, rewrite early history for ~0 tokens and
+            # invalidate a prompt cache from there. Placeholders are fixed points (I2).
+            decisions.append(base | {"reason": "already_stashed"})
+            continue
         if index not in eligible:
             decisions.append(base | {"reason": "not_stash_eligible"})
             continue
-        text = call.result.text
         tokens = count_tokens(text, model).value
         if len(stash_note(tokens, "0" * 12)) >= len(text):
             decisions.append(base | {"reason": "short_result_kept_whole"})

@@ -10,7 +10,22 @@ source file, so a reviewer can audit a pass after the fact.
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+#: C0 controls except tab/newline, DEL, and C1 controls (incl. the 8-bit CSI ``\x9b``).
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def terminal_safe(text: str) -> str:
+    """Escape control characters so untrusted report or source text cannot drive a terminal.
+
+    A report or ``--source`` file can carry tool output from anywhere (web pages, logs); an
+    ANSI/OSC escape in it would otherwise recolour, hide or rewrite what ``lcc explain``
+    prints, or set the terminal title/clipboard. Escapes become visible ``\\x1b`` text.
+    """
+    return _CONTROL.sub(lambda match: f"\\x{ord(match.group()):02x}", text)
+
 
 #: Reason code to plain-language explanation. Keys are exact codes; ``DYNAMIC_REASONS`` covers
 #: the codes that carry a payload after a prefix.
@@ -56,6 +71,11 @@ REASON_EXPLANATIONS: dict[str, str] = {
     "pinned_first_message": "the first message is never scored",
     "pinned_recent": "inside the newest messages, which are never scored",
     "not_judged_fail_safe": "the judge was unavailable, so this call was kept unjudged",
+    # provider="rules" (offline policy, docs/TOOL_CALLS.md)
+    "not_stash_eligible": "no stash rule applies to this call (kept as is)",
+    "identical_output_kept_later": "the same output is kept unchanged later in the session",
+    "stale_read_far_from_recent_work": "an old file read, far from the recent work",
+    "already_stashed": "already a stash pointer from an earlier pass",
 }
 
 #: Reason codes whose explanation depends on the payload after the prefix.
@@ -74,7 +94,12 @@ DYNAMIC_REASONS: dict[str, str] = {
     "protected:": "explicitly protected ({payload}), never scored",
     "kept_by:": "kept by an explicit rule ({payload})",
     "sticky_decision:": "reused sticky decision first made by {payload}",
+    "superseded_by_later_call:": "a later call ({payload}) read the same file or reran the same "
+    "command",
 }
+
+#: Prefix of a ``rules_mode="stashed"`` reason; the rest is the rule that made it eligible.
+_STASHED = "stashed:"
 
 
 def explain_reason(reason: str | None) -> str:
@@ -83,6 +108,9 @@ def explain_reason(reason: str | None) -> str:
         return "no reason recorded"
     if reason in REASON_EXPLANATIONS:
         return REASON_EXPLANATIONS[reason]
+    if reason.startswith(_STASHED):
+        rule = reason[len(_STASHED) :].strip()
+        return f"stashed, exact bytes recoverable: {explain_reason(rule)}"
     for prefix, template in DYNAMIC_REASONS.items():
         if reason.startswith(prefix):
             payload = reason[len(prefix) :].strip()
@@ -101,6 +129,12 @@ def _block_preview(source_lines: list[str], start: int, end: int, width: int = 9
 
 def _fmt_int(value: Any) -> str:
     return f"{value:,}".replace(",", " ") if isinstance(value, int) else str(value)
+
+
+#: Decision kinds only the tool-call rules modes produce. They get their own group (and a
+#: count) when a report holds them; block reports render exactly as before.
+_EXTRA_KINDS = ("replace", "dedupe")
+_EXTRA_GROUPS = (("replace", "REPLACED"), ("dedupe", "DEDUPED"))
 
 
 def summarize(report: dict[str, Any]) -> list[tuple[str, str]]:
@@ -129,7 +163,8 @@ def summarize(report: dict[str, Any]) -> list[tuple[str, str]]:
 
     threshold = report.get("threshold")
     trim = report.get("trim_threshold")
-    if threshold is not None:
+    # The rules policy has no scores, so a threshold row would describe nothing it did.
+    if threshold is not None and report.get("provider_used") != "rules":
         band = f"keep >= {threshold:.2f}" if trim is None else (
             f"keep >= {threshold:.2f}, trim {trim:.2f}-{threshold:.2f}"
         )
@@ -148,9 +183,11 @@ def summarize(report: dict[str, Any]) -> list[tuple[str, str]]:
             f"{_fmt_int(report.get('blocks_protected', 0))} protected",
         )
     )
-    rows.append(
-        ("Decisions", f"{counts['keep']} keep | {counts['trim']} trim | {counts['drop']} drop")
-    )
+    decided = f"{counts['keep']} keep | {counts['trim']} trim | {counts['drop']} drop"
+    for extra in _EXTRA_KINDS:
+        if counts.get(extra):
+            decided += f" | {counts[extra]} {extra}"
+    rows.append(("Decisions", decided))
     rows.append(
         (
             "Chars",
@@ -226,11 +263,17 @@ def render(
     decisions = list(report.get("decisions") or [])
 
     groups: list[tuple[str, str]] = [("drop", "DROPPED"), ("trim", "TRIMMED"), ("keep", "KEPT")]
+    present = {d.get("decision") for d in decisions}
+    groups[2:2] = [(name, title) for name, title in _EXTRA_GROUPS if name in present]
     if only:
         wanted = only.strip().lower()
-        if wanted not in {name for name, _ in groups}:
-            raise ValueError(f"unknown decision {only!r}; expected keep, trim or drop")
-        groups = [(name, title) for name, title in groups if name == wanted]
+        if wanted not in {name for name, _ in groups} | set(_EXTRA_KINDS):
+            raise ValueError(
+                f"unknown decision {only!r}; expected keep, trim or drop "
+                "(or replace, dedupe for a tool-calls rules report)"
+            )
+        groups = [*groups, *_EXTRA_GROUPS]
+        groups = [(name, title) for name, title in groups if name == wanted][:1]
 
     total_shown = 0
     for name, title in groups:
@@ -248,13 +291,21 @@ def render(
             total_shown += 1
             score = decision.get("score")
             score_text = "  n/a " if score is None else f"{score:5.2f}"
-            span = f"{decision.get('line_start', '?')}-{decision.get('line_end', '?')}"
+            if "line_start" not in decision and "tool" in decision:
+                # A tool-call decision: where it sits in the session, not a line span.
+                where = f"msg {decision.get('message_index', '?')} {decision['tool']}"
+                where = f"{where[:17]:<17}"
+            else:
+                span = f"{decision.get('line_start', '?')}-{decision.get('line_end', '?')}"
+                where = f"lines {span:<11}"
             lines.append(
                 f"  {decision.get('id', '?')[:22]:<22} {score_text}  "
-                f"lines {span:<11} {decision.get('chars', 0):>6} chars  "
+                f"{where} {decision.get('chars', 0):>6} chars  "
                 f"{decision.get('source', '?')}"
             )
             lines.append(f"      why: {explain_reason(decision.get('reason'))}")
+            if decision.get("note"):
+                lines.append(f"      now: {decision['note']}")
             if name == "trim" and decision.get("chars_after") is not None:
                 kept = decision["chars_after"]
                 lines.append(f"      kept {kept} of {decision.get('chars', 0)} chars")

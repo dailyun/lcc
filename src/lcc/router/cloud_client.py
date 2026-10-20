@@ -53,6 +53,9 @@ class FireworksRemoteSolver(RemoteSolver):
         self.model_id = model_id
 
     def complete(self, task: TaskInput, prompt: str) -> RemoteAnswer:
+        if os.environ.get("LCC_DISABLE_NETWORK") == "1":
+            # The kill switch wins over a configured key: nothing leaves the machine.
+            raise RemoteProviderError("cloud request refused: LCC_DISABLE_NETWORK=1")
         started = time.perf_counter()
         url = f"{self.base_url}/chat/completions"
         payload = {

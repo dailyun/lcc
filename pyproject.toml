@@ -24,6 +24,10 @@ keywords = [
   "prompt",
   "context",
   "cost",
+  "claude-code",
+  "mcp",
+  "agents",
+  "context-compaction",
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -70,6 +74,7 @@ dev = [
 [project.urls]
 Homepage = "https://github.com/lucasmartins-ai/lcc"
 Repository = "https://github.com/lucasmartins-ai/lcc"
+Source = "https://github.com/lucasmartins-ai/lcc"
 Issues = "https://github.com/lucasmartins-ai/lcc/issues"
 Documentation = "https://lucasmartins-ai.github.io/lcc/"
 Changelog = "https://github.com/lucasmartins-ai/lcc/blob/main/CHANGELOG.md"

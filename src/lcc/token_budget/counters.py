@@ -10,18 +10,22 @@ operation, including indirectly through tiktoken (ADR 0005, ADR 0006, ADR 0008).
 from __future__ import annotations
 
 import contextlib
+import importlib
 import threading
 from collections.abc import Iterator
 from typing import Any
 
 from lcc.schemas import TokenCount, TokenCountMethod
 
-try:  # tiktoken is optional; everything degrades gracefully without it (ADR 0005/0006/0008).
-    import tiktoken
-
+# tiktoken is optional; everything degrades gracefully without it (ADR 0005/0006/0008).
+# Imported dynamically and typed ``Any`` so mypy passes whether or not tiktoken (and its
+# type information) is installed, with ``warn_unused_ignores`` on and no ``type: ignore``.
+tiktoken: Any
+try:
+    tiktoken = importlib.import_module("tiktoken")
     _HAS_TIKTOKEN = True
 except Exception:  # pragma: no cover - exercised only when tiktoken is absent
-    tiktoken = None  # type: ignore[assignment]
+    tiktoken = None
     _HAS_TIKTOKEN = False
 
 _DEFAULT_ENCODING = "cl100k_base"

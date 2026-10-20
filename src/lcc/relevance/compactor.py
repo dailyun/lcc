@@ -28,21 +28,33 @@ import hashlib
 import json
 import logging
 import math
+import os
 import re
 import threading
 import time
+import unicodedata
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from lcc.cleaning.normalize import require_valid_unicode
 from lcc.relevance.blocks import (
     DEFAULT_MAX_BLOCK_CHARS,
     DEFAULT_MIN_BLOCK_CHARS,
     TextBlock,
     gaps_between,
     split_blocks,
+)
+from lcc.relevance.cache_contract import (
+    CACHE_STATES,
+    DEFAULT_INPUT_FACTOR,
+    DEFAULT_READ_FACTOR,
+    DEFAULT_WRITE_FACTOR,
+    CacheFactors,
+    common_prefix_chars,
+    estimate_cache_effect,
 )
 from lcc.relevance.decisions import (
     BLOCK_PARSER_VERSION,
@@ -77,10 +89,13 @@ POLICY_VERSION_ALIAS = POLICY_VERSION
 #: Prompt-cache cost factors from ``docs/CACHE_ALIGNMENT.md``: a cache read costs ~0.10x the
 #: base token price and a cache write ~1.25x. Used to report the break-even reuse count of a
 #: pass that mutates a warm prefix. Override per provider before trusting the figure.
-_CACHE_READ_FACTOR = 0.10
-_CACHE_WRITE_FACTOR = 1.25
+_CACHE_READ_FACTOR = DEFAULT_READ_FACTOR
+_CACHE_WRITE_FACTOR = DEFAULT_WRITE_FACTOR
 
 _DEFAULT_THRESHOLD = 0.4
+_RESTORATION_REASONS = frozenset(
+    {"semantic_sufficiency_restoration", "semantic_verifier_fail_restoration"}
+)
 _DEFAULT_BATCH_SIZE = 8
 _DEFAULT_MAX_STATE_CHARS = 12000
 _DEFAULT_TRIM_HEAD_CHARS = 300
@@ -201,6 +216,23 @@ class RelevanceCompactionRequest:
     #: a provider-independent ``context-ir/0.1`` dict built from the finished
     #: pass. Default off so existing outputs stay byte-identical.
     emit_ir: bool = False
+    #: Cache contract (docs/CACHE_ALIGNMENT.md, "Invariants and tests"). ``None`` = auto:
+    #: runs of dropped blocks collapse into one marker, except with a decisions cache, where
+    #: every dropped block gets its own marker so a run that grows at the tail on the next
+    #: pass never rewrites the marker already emitted (invariant I4).
+    merge_dropped_runs: bool | None = None
+    #: Provider cache state for ``cache_effect``: warm | cold | unknown (priced as warm).
+    cache_state: str = "unknown"
+    #: Requests expected to reuse this context (the next one included) for ``cache_effect``.
+    expected_reuses: int = 1
+    #: Relative price multipliers (x base input price) for ``cache_effect`` and
+    #: ``break_even_reuses``. Defaults are the docs' 0.10x read / 1.25x write.
+    cache_read_factor: float = DEFAULT_READ_FACTOR
+    cache_write_factor: float = DEFAULT_WRITE_FACTOR
+    cache_input_factor: float = DEFAULT_INPUT_FACTOR
+    #: The previous pass's output, when the provider cache holds that rather than the raw
+    #: input (incremental sticky runs). ``cache_effect`` then measures stability against it.
+    previous_compacted_text: str | None = None
     #: Task id recorded in the IR envelope; derived deterministically from the
     #: objective when omitted so identical inputs emit identical bytes.
     task_id: str | None = None
@@ -293,6 +325,11 @@ class RelevanceCompactionReport:
     #: the read/write factors in ``docs/CACHE_ALIGNMENT.md``. ``None`` when nothing was
     #: dropped or nothing was invalidated.
     break_even_reuses: float | None = None
+    #: Cache contract verdict (``lcc.relevance.cache_contract``, additive field): stable
+    #: prefix vs what the provider caches, invalidated/rewritten tokens, relative cost delta
+    #: of the pass vs no pass under the configured multipliers, ``recommended``, and whether
+    #: the pass opened a cache epoch (``epoch_opened``, ``sticky_flips``).
+    cache_effect: dict[str, Any] | None = None
     #: Tokenizer contract: what actually counted the tokens (never imply equivalence
     #: across tokenizers). ``token_count_method`` stays for back-compat; the identity
     #: fields say which tokenizer and whether the figures are estimates.
@@ -371,9 +408,24 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _lexical_terms(text: str) -> set[str]:
+def fold_accents(text: str) -> str:
+    """Lowercase ``text`` with diacritics removed (``Configuração`` -> ``configuracao``).
+
+    Deterministic and locale-independent (Unicode NFKD, then combining marks dropped). Used
+    so lexical matching is accent-insensitive: a Portuguese objective typed without accents
+    still matches the accented source, and an accented word is one term instead of being
+    shredded by the ASCII word pattern (``não`` used to become ``n`` + ``o``). Comparison
+    only: emitted bytes never change.
+    """
+    decomposed = unicodedata.normalize("NFKD", text.lower())
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
+def _lexical_terms(text: str, *, fold: bool = True) -> set[str]:
+    """Content terms of ``text``. ``fold=False`` is the pre-1.2 ASCII-only tokenization, kept
+    for ``specialist-v3`` features, which were computed that way at training time."""
     terms: set[str] = set()
-    for match in _WORD_RE.finditer(text.lower()):
+    for match in _WORD_RE.finditer(fold_accents(text) if fold else text.lower()):
         term = match.group(0).strip("'")
         if len(term) >= 3 and term not in _STOPWORDS:
             terms.add(term)
@@ -443,9 +495,13 @@ def _classify_instruction_block(text: str) -> str | None:
 _LANGUAGE_MARKERS: dict[str, frozenset[str]] = {
     "pt": frozenset(
         {
-            "nao", "são", "sao", "cerca", "porque", "tambem", "também", "muito", "qual",
+            "nao", "não", "são", "sao", "cerca", "porque", "tambem", "também", "muito", "qual",
             "quando", "onde", "entre", "sobre", "ainda", "depois", "cada", "pode", "ser",
             "estar",
+            # Accented function words: unambiguous among the languages listed here. They
+            # never matched before 1.2 because the ASCII word pattern split them.
+            "é", "em", "até", "você", "voce", "uma", "às", "pelo", "pela", "pelos", "pelas",
+            "isso", "isto", "exceto", "estão", "nós", "num", "numa",
         }
     ),
     "es": frozenset(
@@ -460,13 +516,17 @@ _LANGUAGE_MARKERS: dict[str, frozenset[str]] = {
 }
 
 
+_LANGUAGE_WORD_RE = re.compile(r"[^\W\d_]+|\d+")
+
+
 def _detect_language(text: str) -> str | None:
     """Best-effort language tag from unambiguous function words; ``None`` when unsure.
 
     Only a clear signal counts, so English text and short blocks stay ``None`` rather than
     being guessed at.
     """
-    words = [w.lower() for w in _WORD_RE.findall(text)]
+    # Unicode letters, so accented markers ("é", "não", "über") can match at all.
+    words = [w.lower() for w in _LANGUAGE_WORD_RE.findall(text)]
     if len(words) < 12:
         return None
     hits: dict[str, int] = {}
@@ -508,7 +568,7 @@ _SUPERSESSION_CUE_RE = re.compile(r"\b(?:" + SUPERSESSION_CUES + r")\b", re.IGNO
 
 
 def _distinctive_terms(
-    blocks: list[TextBlock], question_terms: set[str]
+    blocks: list[TextBlock], question_terms: set[str], *, fold: bool = True
 ) -> dict[str, set[str]]:
     """Map each distinctive term to the ids of blocks containing it.
 
@@ -520,7 +580,7 @@ def _distinctive_terms(
     ceiling = max(2, len(blocks) // 2)
     occurrences: dict[str, set[str]] = {}
     for block in blocks:
-        for term in _lexical_terms(block.text):
+        for term in _lexical_terms(block.text, fold=fold):
             if len(term) < _DISTINCTIVE_MIN_TERM_CHARS or term in question_terms:
                 continue
             occurrences.setdefault(term, set()).add(block.id)
@@ -533,6 +593,8 @@ def _dependency_closures(
     question_terms: set[str],
     min_shared_terms: int = 2,
     max_hops: int = 1,
+    *,
+    fold: bool = True,
 ) -> dict[str, str]:
     """Blocks pulled in because they share distinctive vocabulary with a kept block.
 
@@ -545,7 +607,7 @@ def _dependency_closures(
     the trap blocks come along too, and it cost roughly twenty points of mean reduction for no
     additional case passing. One hop is the default for that reason.
     """
-    distinctive = _distinctive_terms(blocks, question_terms)
+    distinctive = _distinctive_terms(blocks, question_terms, fold=fold)
     terms_for: dict[str, set[str]] = {}
     for term, ids in distinctive.items():
         for block_id in ids:
@@ -607,6 +669,19 @@ def _clip_for_scoring(text: str, limit: int = _SCORE_CLIP_HEAD + _SCORE_CLIP_TAI
     )
 
 
+#: Opt-in for plain-text ``provider="auto"`` to reach the remote Jev judge. Without it
+#: ``auto`` never leaves the machine, even when a TypeSafe key is configured: a key in the
+#: environment, a key file or the macOS Keychain is not consent to send context off-machine.
+AUTO_REMOTE_ENV = "LCC_AUTO_REMOTE"
+
+
+def auto_remote_enabled() -> bool:
+    """``auto`` may resolve the remote Jev judge (``LCC_AUTO_REMOTE=1``, network allowed)."""
+    return (
+        os.environ.get(AUTO_REMOTE_ENV) == "1" and os.environ.get("LCC_DISABLE_NETWORK") != "1"
+    )
+
+
 def _resolve_client() -> JevClient | None:
     """Default provider resolution; tests monkeypatch this seam to stay offline."""
     from lcc.relevance.jev import default_ledger_path
@@ -665,6 +740,14 @@ def _score_bucket(score: float) -> float:
     return int(score * 10 + 0.5) / 10.0
 
 
+def _line_ending(text: str) -> str:
+    """The line terminator ``text`` ends with (``\r\n``, ``\n``, ``\r``), or ``""``."""
+    for ending in ("\r\n", "\n", "\r"):
+        if text.endswith(ending):
+            return ending
+    return ""
+
+
 def _render_trimmed(
     block_text: str,
     score: float | None,
@@ -690,10 +773,13 @@ def _render_trimmed(
             score_part = f", score {display_score:.2f} in band {trim_threshold:.2f}-{threshold:.2f}"
         else:
             score_part = f", score {display_score:.2f}"
+    # The note ends with the block's own line ending, so whatever follows the block (the
+    # next paragraph, or a code fence with no blank line before it) still starts on its own
+    # line and keeps its paragraph boundary.
     return (
         f"{head.rstrip()}\n"
         f"[lcc-compact: trimmed {len(block_text) - len(head)} of {len(block_text)} chars "
-        f"of this block{score_part}]"
+        f"of this block{score_part}]{_line_ending(block_text)}"
     )
 
 
@@ -773,6 +859,11 @@ def _assemble_compacted(
         index = 0
         total = len(ordered)
         by_id = {block.id: block for block in blocks}
+        merge_runs = (
+            request.decisions_cache_path is None
+            if request.merge_dropped_runs is None
+            else request.merge_dropped_runs
+        )
         while index < total:
             ordered_decision = ordered[index]
             if ordered_decision.id in dropped_ids:
@@ -780,6 +871,8 @@ def _assemble_compacted(
                 while index < total and ordered[index].id in dropped_ids:
                     run.append(ordered[index])
                     index += 1
+                    if not merge_runs:
+                        break
                 pieces.append(gaps[run[0].index - 1])
                 if request.marker:
                     pieces.append(
@@ -787,6 +880,10 @@ def _assemble_compacted(
                             run, request.threshold, include_scores=request.marker_scores
                         )
                     )
+                    # Keep the dropped run's own line ending: without it the marker and the
+                    # next kept block merge into one paragraph, or the marker is glued onto
+                    # the first line of a following code fence.
+                    pieces.append(_line_ending(by_id[run[-1].id].text))
             else:
                 pieces.append(gaps[ordered_decision.index - 1])
                 if ordered_decision.decision == "trim":
@@ -813,6 +910,14 @@ def _assemble_compacted(
     return compacted, dropped_ids, trimmed_ids, mutated_ids, first_mutation_offset
 
 
+def _block_order(block_id: str) -> tuple[int, str]:
+    """Sort key: source order for ``blk_NNNN_<hash>`` ids (numeric past 9999), then the id."""
+    parts = block_id.split("_")
+    if len(parts) == 3 and parts[0] == "blk" and parts[1].isdigit():
+        return int(parts[1]), block_id
+    return -1, block_id
+
+
 def _restoration_rank(
     graph: Any,
     candidate_ids: list[str],
@@ -822,10 +927,10 @@ def _restoration_rank(
 
     Score = edge_count + Σconfidence + risk bonus (QUALIFIES/CONTRADICTS/
     SUPERSEDES/DEPENDS_ON weigh more) + kept dependents. Deterministic
-    tie-break by block id so identical runs emit identical bytes.
+    tie-break by source order (then id) so identical runs emit identical bytes.
     """
     if graph is None:
-        return sorted(candidate_ids)
+        return sorted(candidate_ids, key=_block_order)
 
     def _score(bid: str) -> float:
         edges = graph.edges_touching(bid)
@@ -846,7 +951,7 @@ def _restoration_rank(
                 score += 0.5
         return score
 
-    return sorted(candidate_ids, key=lambda b: (-_score(b), b))
+    return sorted(candidate_ids, key=lambda b: (-_score(b), *_block_order(b)))
 
 
 def _batch_blocks(
@@ -1110,6 +1215,7 @@ def _score_mechanically(
     *,
     protect: bool = True,
     question_language: str | None = None,
+    fold: bool = True,
 ) -> dict[str, tuple[float, str, str | None]]:
     """Local fallback: drop only blocks with zero lexical overlap with the objective.
 
@@ -1118,13 +1224,13 @@ def _score_mechanically(
     and why the block survived anyway. A non-``None`` reason means the deterministic safety net
     kept it; the caller turns that into a keep decision.
     """
-    question_terms = _lexical_terms(question)
+    question_terms = _lexical_terms(question, fold=fold)
     if not question_terms:
         # No objective terms: nothing can be judged irrelevant locally; keep everything.
         return {block.id: (1.0, "mechanical", None) for block in blocks}
     results: dict[str, tuple[float, str, str | None]] = {}
     for block in blocks:
-        overlap = question_terms & _lexical_terms(block.text)
+        overlap = question_terms & _lexical_terms(block.text, fold=fold)
         denominator = max(1, min(6, len(question_terms)))
         score = round(min(1.0, len(overlap) / denominator), 2)
         reason = _deterministic_protection(block.text, question_language) if protect else None
@@ -1137,7 +1243,9 @@ def _score_mechanically(
             for block_id, (score, _, reason) in results.items()
             if score > 0.0 or reason is not None
         }
-        for block_id, reason in _dependency_closures(blocks, kept, question_terms).items():
+        for block_id, reason in _dependency_closures(
+            blocks, kept, question_terms, fold=fold
+        ).items():
             score, source, existing = results[block_id]
             if existing is None:
                 results[block_id] = (score, source, reason)
@@ -1204,6 +1312,15 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
     text = request.text
     if not request.question.strip():
         raise ValueError("relevance compaction requires a non-empty objective (--question)")
+    require_valid_unicode(text, "context text")
+    require_valid_unicode(request.question, "objective")
+    if request.cache_state not in CACHE_STATES:
+        raise ValueError(f"cache_state must be one of {CACHE_STATES}, got {request.cache_state!r}")
+    cache_factors = CacheFactors(
+        read=request.cache_read_factor,
+        write=request.cache_write_factor,
+        input=request.cache_input_factor,
+    )
     blocks = split_blocks(
         text,
         min_block_chars=request.min_block_chars,
@@ -1249,6 +1366,21 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
     if request.preserve_tail_blocks > 0:
         for block in blocks[-request.preserve_tail_blocks :]:
             protected_reasons.setdefault(block.id, "tail_preserve")
+
+    # --- transcripts: the latest user message is the task; it is never a drop candidate.
+    if request.segments:
+        latest_user = max(
+            (s for s in request.segments if s.role == "user" and s.kind == "text"),
+            key=lambda s: s.character_start,
+            default=None,
+        )
+        if latest_user is not None:
+            for block in blocks:
+                if (
+                    block.character_start < latest_user.character_end
+                    and block.character_end > latest_user.character_start
+                ):
+                    protected_reasons.setdefault(block.id, "latest_user_message")
 
     # --- middle gear resolution: trim band [trim_threshold, threshold)
     if request.trim_head_chars <= 0:
@@ -1387,11 +1519,15 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
         )
     pending: list[TextBlock] = []
     reused = 0
+    #: block id -> (cache key, decision the cache holds). Read back after the final
+    #: decisions to persist restorations (I1 ratchet) and to report sticky flips.
+    sticky_decisions: dict[str, tuple[str, str]] = {}
     for block in scoreable:
         key = _cache_key_for(block.text, block.id)
         cached = cache.get(key) if request.decisions_cache_path is not None else None
         if cached is not None:
             reused += 1
+            sticky_decisions[block.id] = (key, cached.decision)
             chars_after: int | None = None
             if cached.decision == "trim":
                 chars_after = len(
@@ -1461,8 +1597,28 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
             specialist_fallback_to_mechanical = True
             degradation_reason = "specialist_v3_unavailable_mechanical_fallback"
     elif provider_requested in ("auto", "jev"):
-        client = request.client if request.client is not None else _resolve_client()
-        if client is None:
+        # Remote only when named: "jev", or "auto" with the LCC_AUTO_REMOTE=1 opt-in. An
+        # injected client is the caller's explicit choice and is always used.
+        auto_local = (
+            provider_requested == "auto" and request.client is None and not auto_remote_enabled()
+        )
+        client = (
+            request.client
+            if request.client is not None
+            else None
+            if auto_local
+            else _resolve_client()
+        )
+        if client is None and auto_local:
+            degraded = True
+            semantic_guarantee = "none"
+            degradation_reason = "jev_unavailable_mechanical_fallback"
+            warnings.append(
+                "auto_local_only: 'auto' scored plain text with the local mechanical scorer; "
+                f"no text left this machine. Name provider 'jev' (or set {AUTO_REMOTE_ENV}=1) "
+                "to use the remote TypeSafe judge (degraded)"
+            )
+        elif client is None:
             if provider_requested == "jev":
                 degraded = True
                 provider_used = "degraded"
@@ -1671,10 +1827,17 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
                     [(block.character_start, block.character_end) for block in blocks],
                     request.segments,
                 )
-                raw = specialist_judge.score(
-                    request.question, [block.text for block in blocks], meta
-                )
+                texts = [block.text for block in blocks]
+                score_and_floor = getattr(specialist_judge, "score_and_floor", None)
+                if callable(score_and_floor):
+                    raw, floor = score_and_floor(request.question, texts, meta)
+                else:  # an injected judge without the floor mask
+                    raw = specialist_judge.score(request.question, texts, meta)
+                    floor = [False] * len(blocks)
                 raw_by_id = {block.id: value for block, value in zip(blocks, raw, strict=True)}
+                floor_ids = {
+                    block.id for block, flagged in zip(blocks, floor, strict=True) if flagged
+                }
             except Exception as exc:  # a ranker failure must never break compaction
                 LOGGER.warning("specialist-v3 ranking failed, using mechanical scoring: %r", exc)
                 provider_used = "specialist-v3+mechanical_fallback"
@@ -1700,6 +1863,11 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
                     )
                     for block in pending
                 }
+                # The rule floor (best goal match, newest error blocks) is a hard keep: its
+                # score bonus alone does not survive a large drop fraction.
+                for block in pending:
+                    if block.id in floor_ids and guarded[block.id] is None:
+                        guarded[block.id] = "specialist_floor"
                 specialist_drop = _specialist_drop_texts(
                     pending, raw_by_id, guarded, request.specialist_drop_fraction
                 )
@@ -1853,6 +2021,7 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
                 content_type=ctype,
             )
             if request.decisions_cache_path is not None:
+                sticky_decisions[block.id] = (_cache_key_for(block.text, block.id), decision_kind)
                 cache.put(
                     _cache_key_for(block.text, block.id),
                     objective=request.question,
@@ -1906,7 +2075,15 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
     # The typed graph makes cross-block dependencies explicit; the verifier restores
     # dropped evidence linked to kept content, up to a bounded restoration budget.
     relationship_edges = 0
-    blocks_restored = 0
+    # A restoration persisted by the sticky ratchet on an earlier pass is still a restored
+    # block in this output: count it, so warm and cold runs report the same figure.
+    blocks_restored = sum(
+        1
+        for decision in decisions.values()
+        if decision.source == "reused"
+        and decision.decision == "keep"
+        and decision.reason in _RESTORATION_REASONS
+    )
     sufficiency_checks = 0
     sufficiency_failures = 0
     sufficiency_confidence: float | None = None
@@ -1995,7 +2172,7 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
             # Restore critical blocks, highest semantic risk first, within budget.
             # Score = edge_count + Σconfidence + risk bonus (QUALIFIES/CONTRADICTS/
             # SUPERSEDES/DEPENDS_ON weigh more) + kept dependents. Deterministic
-            # tie-break by block id so identical runs emit identical bytes.
+            # tie-break by source order so identical runs emit identical bytes.
             restorable = [
                 bid
                 for bid in verdict.critical_dropped_blocks
@@ -2301,6 +2478,35 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
             "semantic verification was requested but no Jev client exists"
         )
 
+    # --- sticky ratchet (cache invariant I1): a restoration that keeps a block the cache
+    # holds as drop/trim is persisted, so the block stays kept on every later pass of this
+    # epoch instead of flip-flopping with the restoration budget. A flip of a decision that
+    # was *reused* this pass rewrites bytes an earlier pass emitted: report it as an epoch.
+    sticky_flips: list[str] = []
+    block_text_by_id = {b.id: b.text for b in blocks}
+    for final in ordered:
+        held = sticky_decisions.get(final.id)
+        if held is None or final.decision == held[1] or final.decision != "keep":
+            continue
+        if final.source == "reused":
+            sticky_flips.append(final.id)
+        if request.decisions_cache_path is not None:
+            cache.put(
+                held[0],
+                objective=request.question,
+                block_text=block_text_by_id[final.id],
+                entry=CachedDecision(
+                    score=final.score, decision="keep", provider="ratchet", reason=final.reason
+                ),
+            )
+    if sticky_flips:
+        warnings.append(
+            f"cache_epoch_opened: {len(sticky_flips)} sticky decision(s) flipped to keep "
+            f"({', '.join(sticky_flips[:8])}); bytes emitted by an earlier pass changed, so a "
+            "warm prefix cache is invalidated from the first of them. The flip is persisted "
+            "and will not repeat."
+        )
+
     before_count = count_tokens(text, request.model)
     after_count = count_tokens(compacted, request.model)
     if first_mutation_offset is None:
@@ -2346,16 +2552,54 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
         dropped_tokens = max(0, before_count.value - after_count.value)
         if invalidated_tokens and dropped_tokens:
             # docs/CACHE_ALIGNMENT.md factors: read 0.10x, write 1.25x.
-            saving_per_reuse = dropped_tokens * _CACHE_READ_FACTOR
-            invalidation_cost = invalidated_tokens * (_CACHE_WRITE_FACTOR - _CACHE_READ_FACTOR)
-            break_even_reuses = round(invalidation_cost / saving_per_reuse, 1)
-            if break_even_reuses > 1.0:
+            saving_per_reuse = dropped_tokens * cache_factors.read
+            invalidation_cost = invalidated_tokens * (cache_factors.write - cache_factors.read)
+            break_even_reuses = (
+                round(invalidation_cost / saving_per_reuse, 1)
+                if saving_per_reuse > 0
+                else None
+            )
+            if break_even_reuses is not None and break_even_reuses > 1.0:
                 warnings.append(
                     f"cache_epoch_risk: this pass invalidates {invalidated_tokens} tokens at "
                     f"offset {first_mutation_offset} to drop {dropped_tokens}; it only pays off "
                     f"after ~{break_even_reuses:g} reuses of the pruned context. Protect the "
                     f"prefix (--prefix-marker/--protect-prefix) or wait for a cache epoch."
                 )
+
+    # --- cache contract: what the provider cache holds (the input, or the previous pass's
+    # output) against the uncompacted and the compacted request.
+    if request.previous_compacted_text is not None:
+        cached_text = request.previous_compacted_text
+        cache_baseline = "previous_output"
+    else:
+        cached_text = text
+        cache_baseline = "input"
+
+    def _prefix_tokens(candidate: str, full_tokens: int) -> int:
+        shared = common_prefix_chars(cached_text, candidate)
+        if shared == len(candidate):
+            return full_tokens
+        return count_tokens(candidate[:shared], request.model).value
+
+    stable_chars = common_prefix_chars(cached_text, compacted)
+    cache_effect = estimate_cache_effect(
+        baseline_tokens=(
+            before_count.value
+            if cached_text is text
+            else count_tokens(cached_text, request.model).value
+        ),
+        no_pass_tokens=before_count.value,
+        no_pass_stable_tokens=_prefix_tokens(text, before_count.value),
+        pass_tokens=after_count.value,
+        pass_stable_tokens=_prefix_tokens(compacted, after_count.value),
+        cache_state=request.cache_state,
+        expected_reuses=request.expected_reuses,
+        factors=cache_factors,
+        baseline=cache_baseline,
+        epoch_opened=stable_chars < len(cached_text) or bool(sticky_flips),
+        sticky_flips=tuple(sticky_flips),
+    ).to_dict()
 
     # --- marker economics: markers cost tokens too; a pass whose markers erase its
     # saving is pathological and must say so explicitly.
@@ -2425,6 +2669,7 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
         semantic_guarantee=semantic_guarantee,
         invalidated_tokens=invalidated_tokens,
         break_even_reuses=break_even_reuses,
+        cache_effect=cache_effect,
         tokenizer=tokenizer_identity_for_count(after_count)["tokenizer"],
         tokenizer_id=tokenizer_identity_for_count(after_count)["tokenizer_id"],
         tokenizer_version=tokenizer_identity_for_count(after_count)["tokenizer_version"],
@@ -2453,7 +2698,8 @@ def compact_context(request: RelevanceCompactionRequest) -> RelevanceCompactionR
         relationship_edges=relationship_edges,
         semantic_decisions=calls,
         semantic_cache_hits=reused,
-        semantic_cache_misses=len(pending) - reused if pending else 0,
+        # ``pending`` already excludes reused blocks: every pending block was a cache miss.
+        semantic_cache_misses=len(pending),
         marker_tokens=_marker_tokens(compacted, request.model),
         policy_version=POLICY_VERSION,
         trim_policy_version=TRIM_POLICY_VERSION,
@@ -2572,6 +2818,7 @@ def report_to_dict(report: RelevanceCompactionReport) -> dict[str, Any]:
         "semantic_guarantee": report.semantic_guarantee,
         "invalidated_tokens": report.invalidated_tokens,
         "break_even_reuses": report.break_even_reuses,
+        "cache_effect": report.cache_effect,
         "needs_review": report.needs_review,
         "review_reason": report.review_reason,
         "semantic_verifier_sufficient": report.semantic_verifier_sufficient,

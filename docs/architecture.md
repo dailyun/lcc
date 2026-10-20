@@ -133,6 +133,11 @@ in [ADR 0010](adr/0010-deterministic-first-preparation-model-assistance.md). `lc
 uses deterministic inspect-first orchestration and question-aware lexical chunk selection.
 Inside `src/lcc`, there is no semantic selection, embeddings, network access, local model call, or remote LLM call. The router and agent subsystem (`src/lcc/agents`, `src/lcc/router`) operate as an extensible orchestration layer outside that deterministic boundary.
 
+The invariants the deterministic core and the compactor keep on hostile input (determinism,
+verbatim kept bytes, exact accounting, idempotence, never-drop protections) and every input and
+compaction edge case, each with the test that pins it, are listed in
+[EDGE_CASES.md](EDGE_CASES.md).
+
 
 ---
 

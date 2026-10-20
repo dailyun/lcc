@@ -92,6 +92,9 @@ lcc measure-session /path/to/rollout.jsonl --markdown
 It runs every mode on one of your sessions, offline, and prints **counts only**: messages, tool
 calls, tokens before and after, messages kept, time. No text, path or tool output. Paste it in
 [Discussions → Results](https://github.com/lucasmartins-ai/lcc/discussions/categories/results).
+Already compacting with lcc? `lcc share-stats` turns your local reports into the same kind of
+counts-only summary ([SHARE_STATS.md](docs/SHARE_STATS.md)), or use the
+[results issue form](https://github.com/lucasmartins-ai/lcc/issues/new?template=results.yml).
 Every number from someone other than me makes the claims above less mine and more true.
 
 ## Why lcc
@@ -107,7 +110,7 @@ Every number from someone other than me makes the claims above less mine and mor
 | Provider | Runs | When it is used | Report says |
 | --- | --- | --- | --- |
 | `specialist-v3` | local, CPU | default (`auto`) whenever transcript blocks are present: the Claude Code hook, `compact_transcript`, `--mode tool-calls` | `semantic_guarantee: none` (a rank, not a judgment) |
-| `mechanical` | local, CPU | `--provider mechanical`; plain text under `auto` when no TypeSafe key is configured | `semantic_guarantee: none` |
+| `mechanical` | local, CPU | `--provider mechanical`; plain text under `auto` (a configured TypeSafe key does not change that unless `LCC_AUTO_REMOTE=1`) | `semantic_guarantee: none` |
 | `rules` (`lossless`, `recoverable`, `stashed`) | local, no model | `provider: rules` for transcripts | `lossless`: only provable duplicates removed; `recoverable`: also outputs that can be re-read; `stashed` (recommended): removed outputs stay byte-recoverable through `recall` |
 | `jev` | remote (TypeSafe API) | opt-in: `--provider jev` / `provider: jev`, needs `TYPESAFE_API_KEY` | semantic judgment or explicit degradation |
 | `laya` | local model | deprecated; runs only when named | named model and fallback state |
@@ -115,7 +118,9 @@ Every number from someone other than me makes the claims above less mine and mor
 `specialist-v3` details and limits: [SPECIALIST.md](docs/SPECIALIST.md). Rules modes:
 [TOOL_CALLS.md](docs/TOOL_CALLS.md). Jev is an optional path you name explicitly
 (`--provider jev`); it sends the objective and context blocks to the TypeSafe API, and
-`LCC_DISABLE_NETWORK=1` disables it. `compact` writes a `relevance-compaction-1.2` report;
+`LCC_DISABLE_NETWORK=1` disables it. `auto` never picks it on its own: having a key is not
+consent to send context off-machine, so plain text under `auto` stays on `mechanical` unless
+you set `LCC_AUTO_REMOTE=1`. `compact` writes a `relevance-compaction-1.2` report;
 check `provider_used` and `degraded` before trusting the output.
 
 ## Benchmarks
@@ -166,7 +171,7 @@ pass as not worth it, and the Claude Code plugin keeps the built-in summary.
 - Protection rules and bounded restoration reduce, but do not rule out, lost evidence; see the
   [safety model](docs/adr/0014-minimum-sufficient-context.md).
 - `specialist-v3` was trained on Claude Code transcripts. Other agents and plain documents are
-  out of distribution; plain text uses `mechanical` unless a TypeSafe key is configured.
+  out of distribution; plain text uses `mechanical` unless you opt in to Jev.
 
 ## Docs
 

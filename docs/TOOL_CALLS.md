@@ -37,7 +37,12 @@ removed or trimmed — so a caller can map it back onto its own session. Message
 all of their content are dropped; results stay in the message they arrived in.
 
 Malformed input fails loudly (exit 2): a decision taken over a half-parsed transcript is not
-auditable. A call without a result yet is left alone — there is nothing to judge.
+auditable. That includes content lcc cannot rebuild: text under `content` instead of `text`,
+any other field holding a non-empty list or object (images, attachments, content blocks), a
+tool result whose content blocks sit under `content`, a call `input` that is not an object, and
+text that is not valid Unicode. Each error names the field. A call without a result yet, and a
+result without a call, are left alone; there is nothing to judge. Calls whose id repeats are
+always kept (`duplicate_tool_use_id`). Every case and its test: [EDGE_CASES.md](EDGE_CASES.md).
 
 ## 2. Decisions
 
@@ -58,8 +63,10 @@ call, and a call is never dropped without its result.
 
 The first message and the newest `--preserve-recent` messages (default 6) are pinned: their
 calls are not scored and not mutated, and they appear in the report as `source: pin` with
-reason `pinned_first_message` / `pinned_recent`. Pinning is the honest way to protect a live
-turn: the objective and the tool you just ran are usually the ones that matter most.
+reason `pinned_first_message` / `pinned_recent`. A call just outside the window whose result
+is inside it is kept whole too (`pinned_recent_result`), so a pinned message never changes.
+Pinning is the honest way to protect a live turn: the objective and the tool you just ran are
+usually the ones that matter most.
 
 ## 4. Budgets and fitting
 
@@ -97,7 +104,8 @@ is a semantic question, and a lexical scorer cannot answer it honestly. Use `--p
 
 ### Offline policy: `--provider rules`
 
-No key, no model, no network. Four modes (`rules_mode`, MCP argument / Python API):
+No key, no model, no network. Four modes (`rules_mode`, MCP argument / Python API;
+`--rules-mode` on the CLI):
 
 **`lossless` (default)** — `src/lcc/relevance/transcript_lossless.py`. A tool result is
 replaced by a pointer to a later result that is kept unchanged and has the same `is_error`
@@ -169,9 +177,12 @@ Each decision is `replace` with reason `stashed:<rule that made it eligible>` an
 (present, hash matches, bytes equal the original); a violation keeps everything. A blob that
 cannot be written keeps its result (`stash_write_failed:<error>`).
 
-Getting a result back re-hashes the blob and refuses one that fails:
+From the CLI. Getting a result back re-hashes the blob and refuses one that fails:
 
 ```bash
+lcc compact session.json -q "fix the booking KeyError" --mode tool-calls \
+  --provider rules --rules-mode stashed -o compacted.json -r report.json
+lcc explain report.json --only replace   # each removed output, its rule and its pointer
 lcc recall 3f9a1c0b2d4e               # whole output; 12-64 hex chars of the sha256
 lcc recall 3f9a1c0b2d4e --lines 40-80 # 1-based, inclusive
 ```
@@ -216,7 +227,9 @@ only, never to Read/Grep of source.
 
 ## 6. CLI options
 
-Honored: `--question`, `--provider jev|laya|auto|rules|specialist-v3`, `--threshold`, `--trim-head-chars`,
+Honored: `--question`, `--provider jev|laya|auto|rules|specialist-v3`,
+`--rules-mode lossless|recoverable|stashed|lossy` (with `--provider rules` only; refused
+elsewhere), `--threshold`, `--trim-head-chars`,
 `--preserve-recent`, `--max-state-tokens`, `--max-request-tokens`, `--batch-size`,
 `--max-workers`, `--min-reduction` (sets `worth_it`), `--model` (token counting),
 `--jev-model`, `-o/--output`, `-r/--report`, `--dry-run`.

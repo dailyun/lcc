@@ -6,6 +6,196 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Security
+
+- **HTTP server: no host-disk access.** `lcc mcp --http` now refuses `workspace_root` and
+  `laya_model` (as it already refused the stash and `recall`). With `provider: rules`,
+  `rules_mode: recoverable`, an anonymous caller could send a crafted transcript naming any
+  file on the server and read `replace_disk_verified` / `keep_disk_mismatch` /
+  `keep_disk_missing` back: a file-existence and file-content oracle on the host. A failing
+  tool call over HTTP now answers `internal error` without the exception text.
+- **MCP transports survive nested JSON.** A single deeply nested line (`[[[[…`) raised an
+  uncaught `RecursionError` and killed the stdio server (`lcc mcp`); it now gets a `-32700`
+  parse error and the server keeps serving. The HTTP server answers `400`.
+- **Regex/quadratic denial of service.** The speech-cleaning filler `\s+n[eé]\?` backtracked
+  quadratically on long blank runs (20 KB took 2 s; 1 MB would take over an hour); it now
+  runs in linear time with identical output. Near-duplicate paragraph detection compared
+  every pair with `difflib` (200 KB of similar-length paragraphs took minutes); it now
+  skips pairs on exact upper bounds (`real_quick_ratio`, `quick_ratio`), builds each kept
+  paragraph's index once, and stops under a deterministic work budget
+  (`NEAR_DUP_CHAR_BUDGET`), keeping the remaining paragraphs and adding a report warning.
+  Results below the budget are unchanged.
+- **`LCC_DISABLE_NETWORK=1` is honored everywhere.** The router's cloud solver (Fireworks /
+  OpenAI-compatible) and the local agent's non-loopback endpoints ignored it; both refuse now.
+- **`lcc explain` escapes terminal control characters** from reports and `--source` files
+  (ANSI/OSC escapes, carriage returns, 8-bit CSI), so untrusted tool output cannot recolour,
+  hide or rewrite what is printed, or set the terminal title or clipboard.
+- **Secrets in local logs.** Request-log redaction now covers secret names glued to longer
+  identifiers (`TYPESAFE_API_KEY=…`, `client_secret: …`) and `Cookie:` headers, and caps the
+  `field` value like the goal. The Jev ledger is created `0600` (was umask, usually
+  world-readable) and redacts bearer tokens and the API key from stored error bodies.
+- **Claude Code pin hook:** the last tool error is pinned inside a fence it cannot close and
+  labelled as quoted data, so an injected tool output cannot pose as instructions to the
+  built-in summarizer.
+- **Supply chain:** GitHub Actions are pinned to commit SHAs (version kept in a comment), the
+  CI workflow sets `permissions: contents: read`, both Docker images run as an unprivileged
+  user, and `.dockerignore` excludes `.env` files and keys.
+
+### Added
+
+- **Edge-case suite for the deterministic core.** These are property tests over a seeded,
+  stdlib-only hostile corpus (`tests/edge_corpus.py`) and every local scorer. They cover
+  determinism (also across `PYTHONHASHSEED` and locale), verbatim kept bytes, exact report
+  accounting, an honestly stated idempotence property, and never-drop protections at any drop
+  budget. Input, transcript and compaction edge cases are pinned too. Each case, its expected
+  behaviour and its test are listed in `docs/EDGE_CASES.md`.
+- **Judge benchmark: five input/compaction edge cases** (`extra_edge_cases`): an accent-less
+  Portuguese goal, re-reads of different ranges, an error fixed later, parallel tool calls, a
+  CRLF table. They are reported in their own section, so the nine original cases stay
+  comparable. `--check` now also requires rules-lossless to keep their needles and v3-blocks
+  to keep `pt_en_mixed`. `benchmarks/results/judge_bench.*` were not regenerated here.
+
+- **Cache contract as code (`lcc.relevance.cache_contract`).** The prompt-cache invariants of a
+  compaction pass are now defined and tested (`docs/CACHE_ALIGNMENT.md`, "Invariants and
+  tests"): I1 prefix stability within an epoch, I2 deterministic placeholders, I3 no
+  non-deterministic fields in emitted text, I4 append never rewrites earlier output unless an
+  epoch is reported. Pure helpers: `common_prefix_chars`, `prefix_stability`,
+  `cache_state_from_idle` (exact TTL is cold, negative gap is clock skew and counts as warm,
+  missing timestamps are unknown), `estimate_cache_effect`.
+- **`cache_effect` in the `relevance-compaction` and `transcript-compaction` reports**
+  (additive field; ADR 0004, so neither `schema_version` changes): stable prefix,
+  `invalidated_prefix_tokens`, `rewritten_tokens`, `removed_tokens`, the relative cost of the
+  pass vs no pass under configurable read/write/input multipliers (defaults 0.10x/1.25x/1x, no
+  prices), `recommended`, `epoch_opened` and `sticky_flips`. `unknown` cache state is priced as
+  warm. New request fields / CLI flags (block mode): `--cache-state`, `--expected-reuses`,
+  `--previous-output` (measure against what the provider actually caches),
+  `--cache-read-factor`, `--cache-write-factor`; MCP `compact_transcript` takes `cache_state`,
+  and the idle stash sends `cold` (`unknown` for a manual `/compact lcc:idle`).
+  `break_even_reuses` now uses the configured factors (same figure at the defaults).
+- **`benchmarks/cache/run_prefix_stability.py`** (`--check`, CI step): grows seeded synthetic
+  sessions turn by turn with a pass in between and reports the byte-identical prefix share.
+  Defaults (12 seeds): block compaction append-only on 96.2% of passes (mean stable share
+  0.975), every break a reported sticky flip; the old merged-marker behaviour scores 82.6%
+  with 18 unexplained breaks. Stashed transcript passes: 0 idempotence violations, 0
+  placeholder rewrites.
+- `test/hook-cache.test.mjs`: idle stash TTL boundaries, `idleMinRemovableTokens` boundary,
+  pass cap, every fail-safe path, idempotent placeholders.
+
+- **`lcc share-stats`: anonymous "share your numbers" summary for beta testers.** Reads local
+  `lcc compact -r` reports and the opt-in request log (`LCC_REQUEST_LOG=1`) and prints Markdown
+  (default) or `--json` (`lcc-share-stats-1.0`) to paste into a "Share your numbers" issue (`results.yml`):
+  pass and provider/mode counts, degraded/fallback passes, passes under the 25% gate, token
+  totals rounded to the nearest 100, p10/median/p90 reduction ratio, idle-stash passes. No
+  text, paths, ids, hashes or times finer than a day; labels outside fixed allowlists become
+  `other`. Corrupt or old files are skipped and counted, never echoed. `--since YYYY-MM-DD`
+  filters the request log. Sends nothing; CLI only, not exposed over MCP.
+  See `docs/SHARE_STATS.md`.
+
+### Changed
+
+- **`auto` stays local for plain text.** `compact` / `lcc compact` / intake relevance with
+  `provider: auto` used to send context blocks to the TypeSafe API whenever a key resolved
+  (environment, `~/.config/lcc/typesafe.key`, a sibling `.env`, or the macOS Keychain), with
+  no explicit opt-in. It now scores with the local `mechanical` provider (report unchanged
+  from the no-key case: `degraded: true`, `jev_unavailable_mechanical_fallback`, plus an
+  `auto_local_only` warning). Escape hatch: name `--provider jev`, or set `LCC_AUTO_REMOTE=1`
+  to restore the old `auto` behaviour. Transcripts under `auto` were already local
+  (`specialist-v3`).
+
+- **Drop markers and trim notes keep the replaced block's line ending.** Before, a marker
+  merged with the next paragraph. When no blank line followed (a code fence right after a
+  paragraph, or a split oversized block), it was glued onto that block's first line and broke
+  the fence. Output bytes after the first mutation change: one line ending per marker or trim.
+- **Mechanical matching is accent-insensitive** (`fold_accents`: NFKD, combining marks
+  dropped). Accented words were split by the ASCII word pattern (`não` became `n` + `o`).
+  Language detection now reads Unicode words and recognises accented Portuguese function
+  words, so Portuguese evidence under an English objective is protected
+  (`evidence_in_pt_not_en`). v3-blocks now keeps the judge-bench `pt_en_mixed` needle (8/9 to
+  9/9 must-keep), with unchanged reduction. specialist-v3 features keep the training-time
+  tokenization (`fold=False`).
+- **specialist-v3 hard floors.** The rule-floor blocks (best goal match, newest error blocks)
+  are never drop candidates (`specialist_floor`). With transcript segments, the latest user
+  message is protected (`latest_user_message`). New `SpecialistJudge.score_and_floor`.
+- **Tool-call mode refuses content it cannot rebuild** and names the field. This covers text
+  under `content`, any non-empty list/object field (images, attachments, content blocks), tool
+  results with `content` blocks, a non-object call `input`, and unpaired surrogates. Before,
+  these parsed as empty and were silently lost from the output.
+- `PROTECTION_VERSION` is `protection-1.2` and `RELATIONSHIP_VERSION` is `relationships-1.1`.
+  The protection and relationship policies changed for non-ASCII text, so sticky decisions
+  start a new cache epoch.
+
+- **With `--decisions-cache`, every dropped block gets its own marker** (format unchanged:
+  `[lcc-compact: dropped 1 block (N chars)]`). A merged run marker counted the whole run, so a
+  run at the tail that grew on the next pass rewrote `dropped 1 block` as `dropped 2 blocks`
+  inside the cached prefix. One-shot passes (no decisions cache) still merge runs;
+  `RelevanceCompactionRequest.merge_dropped_runs` overrides either way. Existing sticky caches
+  re-emit their markers once in the new form (one cache epoch on upgrade).
+- **Sticky ratchet for restorations.** A sufficiency or verifier restoration that keeps a block
+  the decisions cache holds as drop/trim is persisted (`provider: "ratchet"`), so it cannot flip
+  back with the restoration budget on a later pass. When it flips a decision *reused* this pass,
+  the report says so (`cache_effect.sticky_flips`, `cache_epoch_opened` warning); a ratcheted
+  restoration still counts in `blocks_restored`.
+
+- `pyproject.toml`: `Source` URL and the keywords `claude-code`, `mcp`, `agents`,
+  `context-compaction`.
+
+### Fixed
+
+- **`lcc explain` left out `replace` and `dedupe` decisions.** On a `provider: rules` report
+  the outputs that were stashed, re-read pointers or deduped were not listed at all, so the
+  receipt missed exactly the cuts. They now get `REPLACED` / `DEDUPED` groups (only when a
+  report has them; block reports render as before), a count in `Decisions`, the pointer that
+  replaced each output (`now: ...`), plain-language reasons for the rules codes, and
+  `--only replace|dedupe`. Tool-call rows show the message and tool instead of `lines ?-?`,
+  and the meaningless `Thresholds` row is dropped for `rules`.
+- `mypy` passes with and without `tiktoken` installed (no unused `type: ignore`).
+
+- Boilerplate removal deleted `----`, `Page 3 of 10`, `On … wrote:` and similar lines inside
+  fenced code blocks.
+- Paragraph dedup split fenced code on blank lines, deduplicated inside it, and stripped the
+  leading indentation of every paragraph. NFC and NFD spellings of one paragraph are now
+  exact duplicates, and the first keeps its own bytes.
+- Cleaning replaced input text that happened to contain its internal NUL placeholder with a
+  protected block.
+- A leading BOM hid a first-line code fence from cleaning (the code was whitespace-collapsed)
+  and from block segmentation (fence pairing flipped). Cleaning strips the BOM (`strip_bom`);
+  compaction keeps it.
+- Block line numbers ignored a lone CR, and U+2028 or a form feed counted as a line break. An
+  oversized block could be cut between CR and LF. `BLOCK_ID_RE` rejected ids past block 9999,
+  and restoration ties sorted `blk_10000` before `blk_9999`.
+- Trimmed CRLF markdown tables and logs came back with LF line endings, so the head was no
+  longer the block's own bytes.
+- `semantic_cache_misses` subtracted cache hits twice and went negative on warm runs.
+- Unpaired surrogates crashed `optimize` and `compact_context` deep in hashing. They now raise
+  a `ValueError` that names the offset.
+- Tool-call mode with lossy rules, specialist-v3 or Jev: a drop decided for one call also
+  removed every call sharing its id, even in a pinned message. A call just outside the recent
+  window could be dropped together with its result inside the window. Both are now kept
+  (`duplicate_tool_use_id`, `pinned_recent_result`), as the lossless and recoverable modes
+  already did.
+
+- **`rules_mode: stashed` re-stashed its own placeholders.** A second pass over stashed history
+  (a second idle stash) replaced `[removed: 693 tokens · lcc recall <id>]` with a pointer to the
+  pointer (`[removed: 11 tokens · ...]`) whenever the new note was shorter, rewriting early
+  history for ~0 tokens and making `recall` return the pointer. Existing pointers are now kept
+  (`already_stashed`); a stash pass over its own output is a no-op.
+- **Claude Code plugin: a headless engine whose `$.ui.log`/`$.ui.toast` throws** made the idle
+  stash's own error handler throw into `session.start` / `turn.complete`. UI calls are now best
+  effort.
+- **Claude Code plugin: idle pass count from a corrupted store** (`passes: "abc"`) concatenated
+  to a string on `+= 1` and never reached `idleMaxPassesPerSession`; a non-object store record
+  was spread into the new one. Both are sanitised. A negative idle gap (clock skew) now reports
+  `clock skew` instead of `cache warm` (still never fires).
+
+### Documentation
+
+- **`results` issue form** (`.github/ISSUE_TEMPLATE/results.yml`) for anonymous counts:
+  version, provider and mode, agent, tokens before and after, `recall` calls, whether the
+  agent lost something. Session text is never asked for. `config.yml` links Discussions and
+  the security policy; `.github/FUNDING.yml` added.
+- Draft GitHub Release notes in `docs/release-notes/1.2.0.md`, and five starter issues in
+  `docs/contributing/good-first-issues.md`.
+
 ## [1.2.0] - 2026-10-20
 
 ### Added
@@ -242,7 +432,6 @@ ChatGPT plugin.
   reproducible offline usability measurements and explicit benchmark limits.
 - Sprint-7 historical reports now carry an audit notice for final-attempt
   costs, unpaired bootstrap sampling and incomplete reproducibility checks.
-
 
 ### Added
 

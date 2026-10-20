@@ -16,6 +16,49 @@ _TABLE_DELIM = re.compile(
 )
 
 
+#: Prefix of the in-band placeholders that mask protected regions while the rest of a document
+#: is cleaned. Input that already contains it gets a longer, unused prefix instead (see
+#: :func:`placeholder_prefix`), so text that happens to look like a placeholder is never
+#: substituted.
+_PLACEHOLDER_PREFIX = "\x00__LCC_PROTECTED_BLOCK_"
+_BOM = "\ufeff"
+
+
+def placeholder_prefix(text: str) -> str:
+    """A placeholder prefix that does not occur in ``text`` (deterministic in ``text``)."""
+    prefix = _PLACEHOLDER_PREFIX
+    salt = 0
+    while prefix in text:
+        salt += 1
+        prefix = f"\x00__LCC_PROTECTED_BLOCK_{salt}_"
+    return prefix
+
+
+def first_lone_surrogate(text: str) -> int | None:
+    """Offset of the first unpaired UTF-16 surrogate in ``text``, or ``None``.
+
+    Such code points cannot be encoded as UTF-8; they reach a ``str`` through
+    ``errors="surrogateescape"`` decoding or a JSON ``"\\ud800"`` escape. Callers reject them
+    with a clear error instead of crashing later in hashing, tokenizing or writing.
+    """
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        return exc.start
+    return None
+
+
+def require_valid_unicode(text: str, what: str = "input text") -> None:
+    """Raise ``ValueError`` when ``text`` holds an unpaired surrogate (invalid UTF-8)."""
+    offset = first_lone_surrogate(text)
+    if offset is not None:
+        raise ValueError(
+            f"{what} contains an unpaired surrogate (U+{ord(text[offset]):04X}) at offset "
+            f"{offset}: it is not valid Unicode and cannot be encoded as UTF-8. Decode the "
+            "source as UTF-8 (strict) or repair it before running lcc."
+        )
+
+
 @dataclass
 class NormalizeResult:
     """Normalized text plus the list of cleaning steps that were applied."""
@@ -91,6 +134,7 @@ def normalize_text(text: str) -> NormalizeResult:
 
     Steps applied (each recorded in the result):
 
+    0. Remove a leading byte-order mark (U+FEFF).
     1. Convert CRLF / CR line endings to LF.
     2. Strip trailing whitespace from every line (outside fenced code blocks / tables).
     3. Collapse runs of 2+ interior spaces/tabs to a single space in non-code, non-table
@@ -102,6 +146,12 @@ def normalize_text(text: str) -> NormalizeResult:
     are preserved exactly.
     """
     steps: list[CleaningStep] = []
+
+    if text.startswith(_BOM):
+        # A byte-order mark is an encoding artifact, not content. Left in place it also hides
+        # a code fence on the first line from the protection below.
+        text = text[len(_BOM) :]
+        steps.append(CleaningStep("strip_bom", "Removed a leading byte-order mark.", {"bom": 1}))
 
     crlf = text.count("\r\n")
     cr_only = text.count("\r") - crlf
@@ -117,6 +167,7 @@ def normalize_text(text: str) -> NormalizeResult:
 
     raw_lines = normalized.split("\n")
     all_ranges, blocks = _extract_protected_regions(raw_lines)
+    prefix = placeholder_prefix(normalized)
 
     # Build line list with placeholders for protected blocks
     range_map: dict[int, tuple[int, int]] = {}  # start_idx -> (end_idx, block_idx)
@@ -132,7 +183,7 @@ def normalize_text(text: str) -> NormalizeResult:
     while line_idx < n:
         if line_idx in range_map:
             end, block_idx = range_map[line_idx]
-            out_lines.append(f"\x00__LCC_PROTECTED_BLOCK_{block_idx}__\x00")
+            out_lines.append(f"{prefix}{block_idx}__\x00")
             line_idx = end + 1
             continue
 
@@ -179,6 +230,6 @@ def normalize_text(text: str) -> NormalizeResult:
 
     result_text = joined.strip("\n")
     for block_idx, block in enumerate(blocks):
-        result_text = result_text.replace(f"\x00__LCC_PROTECTED_BLOCK_{block_idx}__\x00", block)
+        result_text = result_text.replace(f"{prefix}{block_idx}__\x00", block)
 
     return NormalizeResult(text=result_text, steps=steps)

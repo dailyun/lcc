@@ -39,6 +39,7 @@ MCP (Claude Code, Cursor, Claude Desktop):
 ## Guides
 
 - [Quickstart](QUICKSTART.md): every command, offline
+- [Share your numbers](SHARE_STATS.md): anonymous `lcc share-stats` summary for beta testers
 - [Claude Code plugin](CLAUDE_CODE.md): verbatim `/compact` instead of a lossy summary
 - [Tool-call mode](TOOL_CALLS.md): compacting agent transcripts
 - [Specialist v3](SPECIALIST.md): offline block ranker for structured transcripts
@@ -46,6 +47,7 @@ MCP (Claude Code, Cursor, Claude Desktop):
 - [MCP server](MCP.md): the six tools
 - [ChatGPT plugin](CHATGPT_PLUGIN.md) and [privacy policy](PRIVACY_POLICY.md)
 - [Architecture](architecture.md) and [roadmap](roadmap.md)
+- [Edge cases](EDGE_CASES.md): hostile input and compaction corner cases, and the tests that pin them
 
 Source, issues and releases: [github.com/lucasmartins-ai/lcc](https://github.com/lucasmartins-ai/lcc).
 Maintained by [LookADev](https://lookadev.com).

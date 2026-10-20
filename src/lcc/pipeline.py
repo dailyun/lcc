@@ -18,6 +18,7 @@ from lcc.cleaning import (
     remove_common_boilerplate,
 )
 from lcc.cleaning.boilerplate import BoilerplateResult
+from lcc.cleaning.normalize import require_valid_unicode
 from lcc.prompt_builder import PromptSpec, build_prompt
 from lcc.reporting.report import build_report
 from lcc.schemas import CleaningStep, CostEstimate, OptimizationReport, TokenCountMethod
@@ -64,6 +65,8 @@ def optimize(request: OptimizationRequest) -> OptimizationResult:
     """
     warnings: list[str] = []
     raw = request.raw_text
+    require_valid_unicode(raw, "input text")
+    require_valid_unicode(request.question, "question")
     if not raw.strip():
         warnings.append("Input text is empty or whitespace-only; nothing to optimize.")
 
@@ -103,6 +106,13 @@ def optimize(request: OptimizationRequest) -> OptimizationResult:
             f"Optimized context is {optimized_tokens.value} tokens, above the "
             f"--max-input-tokens limit of {request.max_input_tokens}. lcc does not perform "
             "lossy summarization; reduce the input or raise the limit."
+        )
+
+    if dedup.near_duplicate_budget_exhausted:
+        warnings.append(
+            "Near-duplicate detection stopped early: the input has too many similar-length "
+            "paragraphs to compare pairwise within the work budget. Later paragraphs were "
+            "checked for exact duplicates only and otherwise kept."
         )
 
     if TokenCountMethod.APPROXIMATE in (original_tokens.method, optimized_tokens.method):

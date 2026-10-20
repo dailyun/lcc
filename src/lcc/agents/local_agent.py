@@ -11,6 +11,7 @@ import os
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
@@ -84,6 +85,20 @@ class ChatFormatter:
             prompt = f"User: {user_message}\n\nAssistant:\n"
         return prompt, stop_tokens
 
+
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _refuse_if_network_disabled(url: str) -> None:
+    """``LCC_DISABLE_NETWORK=1`` allows only a loopback model server (Ollama on localhost)."""
+    if os.environ.get("LCC_DISABLE_NETWORK") != "1":
+        return
+    host = urllib.parse.urlparse(url).hostname
+    if host not in _LOOPBACK_HOSTS:
+        raise ConnectionRefusedError(
+            f"LCC_DISABLE_NETWORK=1: refusing non-loopback model endpoint {host!r}"
+        )
 
 @dataclass
 class LocalAgentConfig:
@@ -223,6 +238,7 @@ class LocalAgent:
             else f"{self.endpoint}/v1/models"
         )
         try:
+            _refuse_if_network_disabled(test_url)
             req = urllib.request.Request(test_url, headers={"User-Agent": "lcc-local-agent/1.0"})
             with urllib.request.urlopen(req, timeout=3.0) as resp:  # noqa: S310
                 data = json.loads(resp.read().decode("utf-8"))
@@ -292,6 +308,7 @@ class LocalAgent:
         return "/v1" in self.endpoint
 
     def _http_post(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
+        _refuse_if_network_disabled(url)
         data_bytes = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             url,

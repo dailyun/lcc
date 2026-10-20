@@ -52,6 +52,7 @@ from lcc.relevance.ir import (
     summarize_ir,
 )
 from lcc.reporting.explain import render as render_explanation
+from lcc.reporting.explain import terminal_safe
 from lcc.reporting.report import report_to_dict, summary_rows, write_report
 from lcc.semantic_retrieval import (
     LOCAL_INDEX_V1_ADAPTER,
@@ -920,6 +921,66 @@ def request_log_command(
     )
 
 
+@app.command("share-stats")
+def share_stats_command(
+    reports: list[Path] | None = typer.Argument(
+        None,
+        metavar="[REPORT]...",
+        help="Report JSON files written by `lcc compact -r` (either mode).",
+        show_default=False,
+    ),
+    request_log_dir: Path | None = typer.Option(
+        None,
+        "--request-log",
+        help="Request-log directory (default: LCC_REQUEST_LOG_DIR or ./.lcc/request-log).",
+    ),
+    no_request_log: bool = typer.Option(
+        False, "--no-request-log", help="Do not read the request log."
+    ),
+    since: str | None = typer.Option(
+        None, "--since", help="Only count request-log entries on or after YYYY-MM-DD."
+    ),
+    as_json: bool = typer.Option(
+        False, "--json", help="Print the lcc-share-stats-1.0 JSON instead of Markdown."
+    ),
+    output: Path | None = typer.Option(
+        None, "--output", "-o", help="Write the summary to this file instead of stdout."
+    ),
+) -> None:
+    """Print an anonymous summary of counts to paste into a "Share your numbers" issue.
+
+    Reads local reports and the request log only; sends nothing. The summary holds counts,
+    rounded totals and fixed labels: never text, paths, ids, hashes or exact times.
+    """
+    from lcc import request_log, share_stats
+
+    try:
+        since_day = share_stats.parse_since(since)
+    except ValueError as exc:
+        _fail(str(exc), code=2)
+    log_file = (
+        None
+        if no_request_log
+        else (request_log_dir or request_log.log_dir()) / request_log.LOG_FILE
+    )
+    inputs = share_stats.load_inputs(
+        list(reports or []),
+        log_file,
+        since=since_day,
+        warn=lambda message: err_console.print(f"[yellow]warning:[/yellow] {message}"),
+    )
+    summary = share_stats.build_summary(inputs, since=since_day)
+    rendered = share_stats.to_json(summary) if as_json else share_stats.to_markdown(summary)
+    if output is None:
+        sys.stdout.write(rendered)
+        return
+    try:
+        output.write_text(rendered, encoding="utf-8")
+    except OSError as exc:
+        _fail(f"could not write the summary to {output}: {exc}")
+    err_console.print(f"Summary written to: [green]{output}[/green]")
+
+
 @app.command("diff")
 def diff_command(
     left: str = typer.Argument(..., metavar="LEFT", help="First text file (e.g. the original)."),
@@ -1303,8 +1364,8 @@ def compact_command(
             "offline, 8,192-token budget), stronger zero-shot judgment than Laya but "
             "needs ~18GB weights plus Apple Silicon or an NVIDIA BF16 GPU "
             "(semantic_guarantee=judged) — use when you want the best local semantics "
-            "and have the hardware. 'auto' prefers Jev, falls back to mechanical "
-            "with degraded:true. "
+            "and have the hardware. 'auto' stays local (mechanical, degraded:true) unless "
+            "LCC_AUTO_REMOTE=1 lets it use Jev when a key is configured. "
             "Missing Laya extra falls back to mechanical as laya+mechanical_fallback "
             "(degraded:true); missing Nimble checkout as nimble+mechanical_fallback. "
             "See docs/NIMBLE.md for the decision table."
@@ -1443,6 +1504,31 @@ def compact_command(
     output_path: Path | None = typer.Option(
         None, "--output", "-o", help="Write the compacted text here (otherwise stdout)."
     ),
+    cache_state: str = typer.Option(
+        "unknown",
+        "--cache-state",
+        help=(
+            "Provider prompt-cache state for the report's cache_effect: warm, cold or unknown "
+            "(priced as warm). cache_effect.recommended says whether the pass pays for itself."
+        ),
+    ),
+    expected_reuses: int = typer.Option(
+        1, "--expected-reuses", help="Requests expected to reuse the context, for cache_effect."
+    ),
+    previous_output: Path | None = typer.Option(
+        None,
+        "--previous-output",
+        help=(
+            "The previous pass's output (what the provider has cached). cache_effect then "
+            "measures the stable prefix against it and reports a cache epoch if it changed."
+        ),
+    ),
+    cache_read_factor: float = typer.Option(
+        0.10, "--cache-read-factor", help="Cache read price as a multiple of input price."
+    ),
+    cache_write_factor: float = typer.Option(
+        1.25, "--cache-write-factor", help="Cache write price as a multiple of input price."
+    ),
     append_to: Path | None = typer.Option(
         None,
         "--append-to",
@@ -1580,6 +1666,11 @@ def compact_command(
                 ("--no-marker", no_marker, False),
                 ("--marker-scores", marker_scores, False),
                 ("--append-to", append_to, None),
+                ("--cache-state", cache_state, "unknown"),
+                ("--expected-reuses", expected_reuses, 1),
+                ("--previous-output", previous_output, None),
+                ("--cache-read-factor", cache_read_factor, 0.10),
+                ("--cache-write-factor", cache_write_factor, 1.25),
                 ("--require-exact-tokens", require_exact_tokens, False),
                 ("--semantic-verify", enable_semantic_verify, False),
                 ("--no-sufficiency", not enable_sufficiency, False),
@@ -1621,6 +1712,12 @@ def compact_command(
         return
 
     raw = _read_input(input_path)
+    previous_text: str | None = None
+    if previous_output is not None:
+        try:
+            previous_text = previous_output.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            _fail(f"could not read --previous-output {previous_output}: {exc}", code=2)
     request = RelevanceCompactionRequest(
         text=raw,
         question=question,
@@ -1657,6 +1754,11 @@ def compact_command(
         enable_semantic_verify=enable_semantic_verify,
         emit_ir=emit_ir_path is not None,
         source_origin=input_path if input_path != "-" else "stdin",
+        cache_state=cache_state,
+        expected_reuses=expected_reuses,
+        previous_compacted_text=previous_text,
+        cache_read_factor=cache_read_factor,
+        cache_write_factor=cache_write_factor,
     )
     try:
         result = compact_context(request)
@@ -1846,7 +1948,7 @@ def explain_cmd(
             rendered = render_ir_explanation(payload, only=only, limit=limit)
         except ValueError as exc:
             _fail(str(exc), code=2)
-        sys.stdout.write(rendered + "\n")
+        sys.stdout.write(terminal_safe(rendered) + "\n")
         return
     if "decisions" not in payload:
         _fail(
@@ -1870,7 +1972,7 @@ def explain_cmd(
         )
     except ValueError as exc:
         _fail(str(exc), code=2)
-    sys.stdout.write(rendered + "\n")
+    sys.stdout.write(terminal_safe(rendered) + "\n")
 
 
 @app.command(name="recall")
@@ -1975,7 +2077,10 @@ def intake_cmd(
     enable_relevance: bool = typer.Option(
         False,
         "--enable-relevance",
-        help="Opt in to instant relevance compaction (Jev-scored) before compilation.",
+        help=(
+            "Opt in to instant relevance compaction before compilation (local unless "
+            "--relevance-provider jev)."
+        ),
     ),
     relevance_threshold: float = typer.Option(
         0.4,

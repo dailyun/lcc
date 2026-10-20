@@ -117,6 +117,13 @@ Guards:
   already crossed the cap.
 - It sends the session directory as `workspace_root`, so `stashed` can take file reads the
   disk still holds. Reads under a system temp directory are never stashed (a `rules` rule).
+- **Cache edges** ([invariants](CACHE_ALIGNMENT.md#invariants-and-tests)): a gap exactly at
+  `idleTtlSeconds` counts as cold; a negative gap (clock skew) or a missing timestamp never
+  does. The pass sends `cache_state: "cold"` (`unknown` for a manual `/compact lcc:idle`), and
+  the report's `cache_effect` prices it. Existing `[removed: … · lcc recall <id>]` placeholders
+  are never stashed again, so a second idle stash over stashed history removes nothing new
+  from them and keeps their bytes. UI calls are best effort: a headless engine without toasts
+  never makes a hook throw.
 
 Toasts: `lcc: idle stash (removed N tokens, S output(s) stashed, idle 2h-8h; recall brings any
 back)` or `lcc: idle stash skipped (reason)`. With `LCC_REQUEST_LOG=1` the MCP server's request
