@@ -85,6 +85,8 @@ lcc explain report.json --source notes.md         # why each block was kept or d
 
 ```sh
 lcc measure-session ~/.claude/projects/<project>/<session>.jsonl --markdown
+# Codex CLI rollouts are auto-detected from their session_meta record:
+lcc measure-session /path/to/rollout.jsonl --markdown
 ```
 
 It runs every mode on one of your sessions, offline, and prints **counts only**: messages, tool

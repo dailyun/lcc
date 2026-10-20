@@ -1076,7 +1076,8 @@ def _compact_tool_calls(
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
         first = raw.lstrip().split("\n", 1)[0]
-        if first.startswith("{") and '"type"' in first:  # a Claude Code session file (JSONL)
+        # A Claude Code session or Codex rollout (JSONL).
+        if first.startswith("{") and '"type"' in first:
             from lcc.session_report import messages_from_jsonl
 
             payload = {"messages": messages_from_jsonl(raw.splitlines())}
@@ -1893,7 +1894,7 @@ def recall_cmd(
 @app.command(name="measure-session")
 def measure_session_cmd(
     session: Path = typer.Argument(
-        ..., help="A Claude Code session file (~/.claude/projects/<project>/<id>.jsonl).",
+        ..., help="A Claude Code session or Codex CLI rollout file (JSONL; format auto-detected).",
         show_default=False, exists=True, dir_okay=False,
     ),
     as_json: bool = typer.Option(False, "--json", help="Print the report as JSON."),
