@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format is based on
 
 ### Security
 
+- Existing Jev ledger files are tightened to `0600` before appending (#70).
 - **HTTP server: tool errors no longer echo exception text** (#73). A failing tool call over
   `lcc mcp --http` shows only the handlers' own validation messages (missing `text`, a bad
   `provider`, `'threshold' must be a number`); any other error answers
@@ -48,6 +49,25 @@ All notable changes to this project are documented here. The format is based on
   user, and `.dockerignore` excludes `.env` files and keys.
 
 ### Added
+
+- **`lcc measure-session --input-map`: where a session's input tokens go.** Reads the
+  provider's own usage records in a Claude Code session or Codex rollout and reports billed
+  input split into uncached, cache-write and cache-read tokens, the cost-weighted split
+  (read 0.1×, write 1.25×, as in `docs/CACHE_ALIGNMENT.md`), and each category's share of
+  billed input: fixed overhead (system prompt, tool schemas, instructions), tool results,
+  tool-call inputs, harness attachments, user and assistant text, compaction summaries. Plus
+  a drill-down by tool and attachment type, re-reads and duplicate outputs. Codex rollouts
+  carry the system prompt and tool schemas, so those are counted directly (`base_instructions`
+  once, even when a developer message repeats it); a Codex response's own calls and their
+  outputs are charged from the next request on, and a compaction rebuilds the context from its
+  `replacement_history`. For Claude Code the fixed overhead is the intercept of a fit of
+  billed input on transcript size. Shares assume one tokenizer ratio across categories, so
+  they rank categories rather than give exact percentages, and the output says so. Counts
+  only, offline, JSON or Markdown: tool names and attachment types appear, MCP tool names
+  (which carry server names) are grouped as `mcp`. On a 938-request Claude Code session it
+  runs in under a second. `--input-map` runs no compaction mode, so it refuses `--question` /
+  `-q` (exit code 2). Before this was fixed, unreleased builds of `main` ignored the flag
+  silently.
 
 - `lcc measure-session --question/-q` passes a specific question or objective to every
   compaction mode, retaining the previous default when omitted (#61).
@@ -159,6 +179,19 @@ All notable changes to this project are documented here. The format is based on
 
 - Keep plain integer `max_tokens` and `tokens` counts in request logs (#72), redacting
   bounded input and dropping partial boundary words so a secret cannot be mistaken for a count.
+- **`measure-session --input-map` and compactions.** Claude Code: the messages a compaction
+  keeps (`compactMetadata.preservedMessages` / `preservedSegment`) stay in the replayed context
+  instead of vanishing at the boundary. Codex: the compaction call, billed only through
+  `token_usage_record` / `latest_token_usage_record`, is now counted (once per response id; on
+  one local rollout with two compactions that added 653,505 billed tokens, matching the usage
+  records exactly), and an encrypted compaction summary is shown as
+  `unattributed (opaque summary)`, sized from the next request's billed input, with a warning.
+  The report also warns when Claude Code's fixed overhead cannot be separated, instead of
+  silently spreading it over the other categories. `session_report.codex_message` is public.
+  Claude Code `<synthetic>` messages (local API errors, zero usage) are not requests; a split
+  response without `requestId` is keyed by `message.id`; `preservedSegment` is followed as a
+  `parentUuid` chain, so a rewound branch between head and tail is not counted; and tool
+  results a compaction keeps stay in the re-read and duplicate indexes.
 - Preserve CRLF separators when joining trimmed log lines (#71); `TRIM_POLICY_VERSION` is now `trim-1.3`, changing prompt-cache identity. Historical `trim-1.2` benchmark results are unchanged.
 - **`lcc explain` left out `replace` and `dedupe` decisions.** On a `provider: rules` report
   the outputs that were stashed, re-read pointers or deduped were not listed at all, so the
