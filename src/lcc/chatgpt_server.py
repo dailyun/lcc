@@ -195,8 +195,9 @@ def _local_only_refusal(payload: dict[str, Any]) -> dict[str, Any] | None:
     arguments = params.get("arguments")
     stashed = isinstance(arguments, dict) and arguments.get("rules_mode") == "stashed"
     # laya_model names a local path or Hub repo to load weights from: also the host's disk.
+    # ledger appends to the host's local ledger file.
     disk = isinstance(arguments, dict) and any(
-        bool(arguments.get(key)) for key in ("workspace_root", "laya_model")
+        bool(arguments.get(key)) for key in ("workspace_root", "laya_model", "ledger")
     )
     if params.get("name") not in _LOCAL_ONLY_TOOLS and not stashed and not disk:
         return None
@@ -204,9 +205,23 @@ def _local_only_refusal(payload: dict[str, Any]) -> dict[str, Any] | None:
         payload.get("id"),
         -32602,
         "the local disk (rules_mode 'stashed', tool 'recall', 'workspace_root', "
-        "'laya_model') is only "
+        "'laya_model', 'ledger') is only "
         "served over stdio (`lcc mcp`), never over HTTP",
     )
+
+
+def _no_ledger(payload: dict[str, Any]) -> None:
+    """The ledger is the host's local file: never written over HTTP, whatever the env says.
+
+    A truthy ``ledger`` argument is refused above; this pins ``ledger: false`` on every
+    ``compact_transcript`` call so an inherited ``LCC_LEDGER=1`` cannot turn it on either.
+    """
+    params = payload.get("params")
+    if payload.get("method") != "tools/call" or not isinstance(params, dict):
+        return
+    arguments = params.get("arguments")
+    if params.get("name") == "compact_transcript" and isinstance(arguments, dict):
+        arguments["ledger"] = False
 
 
 def _handle(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, bool]:
@@ -217,11 +232,10 @@ def _handle(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, bool]:
     """
     is_notification = "id" not in payload
     try:
-        response = (
-            _local_only_refusal(payload)
-            or _anonymous_provider_refusal(payload)
-            or handle_message(payload, echo_errors=False)
-        )
+        response = _local_only_refusal(payload) or _anonymous_provider_refusal(payload)
+        if response is None:
+            _no_ledger(payload)
+            response = handle_message(payload, echo_errors=False)
     except TranscriptError as exc:
         # Shape errors name only the caller's own fields and indices, never server paths,
         # so the caller gets the reason (e.g. text under 'content') instead of a bare error.
