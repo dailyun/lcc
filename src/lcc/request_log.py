@@ -65,7 +65,9 @@ RULES: tuple[tuple[str, str], ...] = (
     # NAME_API_KEY=..., client_secret: ...: the secret word glued to a longer identifier.
     (
         r"\g<token_prefix><TOKEN>",
+        # Only exact count names with a whole integer value are exempt; numeric secrets stay hidden.
         r"(?i)(?<![\w-])(?P<token_prefix>-*)\b"
+        r"(?!(?:max_tokens|tokens)\s*[:=]\s*[0-9]+(?=\s|$))"
         r"(?=[\w-]*(?:api[_-]?key|access[_-]?key|token|secret|password|passwd))"
         r"[\w-]+\s*[:=]\s*\S+",
     ),
@@ -180,6 +182,18 @@ def redact(text: str) -> str:
         else:
             text = pattern.sub(label, text)
     return text
+
+
+def _cut(text: str) -> str:
+    """Bound redaction work without treating a partial word as a complete value."""
+    text = text.strip()
+    if len(text) <= MAX_GOAL_CHARS:
+        return text
+    head = text[:MAX_GOAL_CHARS]
+    if not text[MAX_GOAL_CHARS].isspace() and not head[-1].isspace():
+        words = head.rsplit(None, 1)
+        return words[0] if len(words) > 1 else ""
+    return head
 
 
 # Short-goal EN/PT heuristic: the PLAN section 3 gate counts EN and PT only.
@@ -342,7 +356,7 @@ def log_request(
     if not enabled() or not isinstance(goal, str) or not goal.strip():
         return None
     try:
-        redacted = redact(goal.strip()[:MAX_GOAL_CHARS])
+        redacted = redact(_cut(goal))
         if not (isinstance(language, str) and re.fullmatch(r"[a-z]{2}", language)):
             language = detect_language(redacted)
         directory = log_dir()
@@ -355,11 +369,7 @@ def log_request(
             "language": language,
             "session": session_hash(key, _salt(directory)),
             "tool": tool,
-            "field": (
-                redact(field.strip()[:MAX_GOAL_CHARS])
-                if isinstance(field, str) and field.strip()
-                else "none"
-            ),
+            "field": (redact(_cut(field)) if isinstance(field, str) and field.strip() else "none"),
             "lcc_version": __version__,
             "redaction_ruleset_sha256": RULESET_SHA256,
         }

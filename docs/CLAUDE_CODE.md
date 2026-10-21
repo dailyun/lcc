@@ -68,6 +68,55 @@ Set through `/plugin` → lcc, or `claude plugin install lcc@lcc --config key=va
 | `idleTtlSeconds` (`7200`) | idle seconds after the last turn before a resumed session's cache counts as cold |
 | `idleMinRemovableTokens` (`10000`) | below this many removable tool-output tokens the idle stash does nothing |
 | `idleMaxPassesPerSession` (`8`) | cap on idle stashes per session |
+| `ledger` (`false`) | opt-in local ledger for the statusline, see [below](#receipt-ledger-and-statusline) |
+
+## Receipt, ledger and statusline
+
+**Receipt.** Every compaction this plugin applies toasts one line built by the server
+(`lcc.receipt.receipt_line`): tokens before and after, what was removed, and how to get it back.
+
+```text
+lcc: verbatim compaction via rules, no summary (48,210 -> 31,004 tokens (-17,206, -35.7%) · 2 stashed, 1 deduped · recall: lcc recall aaaaaaaaaaaa (+1 more))
+```
+
+The CLI prints the same line last after `lcc compact --mode tool-calls`; `--receipt` prints the
+full one (the five largest stashed outputs with their `recall` ids, and the cache effect).
+Dropped or trimmed outputs (a judge, or `rulesMode: lossy`) are not recallable, and the line
+says so.
+
+**Ledger (opt-in, off by default).** With `ledger: true` (or `LCC_LEDGER=1` in the MCP
+server's environment) the server appends one JSON line per compaction the hook applies to
+`~/.cache/lcc/ledger.jsonl` (`LCC_LEDGER_PATH`; directory `0700`, file `0600`):
+
+```json
+{"v":1,"ts":"2026-10-21T09:12:03Z","session":"e279159a3ffc189d","provider":"rules","tokens_before":148210,"tokens_after":121004,"stashed":14,"deduped":3,"replaced":16,"dropped":0,"trimmed":0}
+```
+
+Counts and fixed labels only: no transcript text, no paths, no tool names or inputs, and the
+session id only as a truncated SHA-256. Nothing reads it but the statusline, and nothing is
+sent anywhere. The server writes it (hook modules have no file system) only for a pass that
+meets the hook's own replacement rule (not degraded, over `minReductionRatio`, removed
+something). Idle-stash passes are not recorded: the server cannot see whether Claude Code
+accepts that compaction. The HTTP server (`lcc mcp --http`) refuses `ledger`, as it refuses
+the stash, and never writes the ledger even when it inherits `LCC_LEDGER=1`. Delete the file to reset it.
+
+**Statusline.** `scripts/statusline.mjs` reads the ledger and Claude Code's statusline JSON
+on stdin. Add it to `~/.claude/settings.json` with the plugin's path on your machine:
+
+```json
+{ "statusLine": { "type": "command", "command": "node /path/to/plugins/claude-code/scripts/statusline.mjs" } }
+```
+
+It prints the tokens this session's passes removed, the outputs stashed, and the cache-read
+share of the last request (from Claude Code's `context_window.current_usage`, when present):
+
+```text
+lcc: -40.6k tokens (2 passes) · 23 stashed · cache read 92%
+```
+
+`lcc: no pass this session` before the first applied pass; `lcc: ledger off` when there is no
+ledger file. Generated from the fixture ledger in `test/fixtures/ledger.jsonl`
+(`node test/statusline.test.mjs`).
 
 ## Idle stash (opt-in)
 
@@ -341,6 +390,62 @@ grep -E "\[lcc\]|session\.compact \(" /tmp/lcc-compact.log
 Note that Claude Code is a *consumer*, not a requirement: the same pass runs from the CLI
 (`lcc compact transcript.json --mode tool-calls`) and from any MCP client through `lcc mcp`
 (`compact_transcript`), with no editor involved.
+
+## Limitations
+
+### The built-in guard skips this hook (`cc-plugin-sec-default`)
+
+Observed on Claude Code 2.1.296 (2026-10-21, real `/compact`): the plugin's `session.compact`
+hook did not run and Claude Code's own summary did. The toast reads:
+
+```
+lcc: its session.compact hook was skipped. "cc-plugin-sec-default" runs first and sent the event on past it.
+```
+
+Why, from Claude Code's docs and the guard's source (not from a trace of this run):
+
+- Function hooks on one event form a middleware chain ordered by tier: the built-in guard
+  `sec-default@builtin` (listed as `cc-plugin-sec-default`) and the organization's
+  `prependPlugins` first, then the plugins a person installs (tier `user`, where `lcc@lcc`
+  sits), then `appendPlugins`, then other built-ins, then Claude Code itself
+  ([order mods run in](https://code.claude.com/docs/en/plugins/mods/events#the-order-mods-run-in)).
+- A managed-tier mod may call `next.to(e, "append")`, which skips every `user`-tier hook
+  ([hook function](https://code.claude.com/docs/en/plugins/mods/reference#the-hook-function)).
+  It is not `next(e)`: the `user` tier never sees the event.
+- The guard does exactly that on `session.compact`, by design: "Continue past the user tier,
+  whole ... A person's own compaction hook does not run where this plugin is seated"
+  ([`mods/sec-default/README.md`](https://github.com/anthropics/claude-code/blob/main/mods/sec-default/README.md),
+  commit `5a2676e1079c`). It does the same on `session.append` for compaction rows.
+- The guard loads when the machine has managed settings or the session runs on a Team or
+  Enterprise `/login`
+  ([default behaviour](https://code.claude.com/docs/en/plugins/mods/admin#know-what-happens-by-default)).
+  This machine has no `/Library/Application Support/ClaudeCode/` folder, so the login is the
+  likely trigger. Why an earlier run in the same setup reached the hook was not determined; a
+  different credential for that run would explain it (INFERIDO).
+
+What still works where the guard is seated: the classic `PreCompact` and `SessionStart`
+pin hooks are settings hooks, which Claude Code runs as its own behaviour, so the built-in
+summary still gets the pinned facts ([above](#without-the-early-access-flag-or-a-key-pinned-facts-in-the-built-in-summary)).
+The opt-in idle stash cannot stand either: its `$.session.compact` call reaches no `lcc`
+hook, and the `PreCompact` backstop blocks the built-in summary for that call (by the hook's
+design; not observed under the guard).
+
+How to tell: the toast above; `/plugin` lists `cc-plugin-sec-default`; and a `claude --debug`
+log shows `hooks module lcc@lcc loaded (... tier user)`.
+
+Workarounds. A person cannot turn the guard off or reorder it, and no hook-side change can
+help: the `user` tier is skipped before `lcc` is called, so the `.catch` handler does not run
+either. The documented options all sit with whoever deploys managed settings:
+
+| Option | Effect | Cost |
+| :--- | :--- | :--- |
+| Install `lcc` as an organization mod: a local directory marketplace named in managed `extraKnownMarketplaces`, `"lcc@<that marketplace>": true` in managed `enabledPlugins`, and the id in managed `prependPlugins` before `sec-default@builtin` | `lcc` runs in the `prepend` tier, ahead of the guard | the plugin must be read in place from that folder; a copy from GitHub (`claude plugin marketplace add lucasmartins-ai/lcc`) always counts as the user's ([conditions](https://code.claude.com/docs/en/plugins/mods/admin#install-your-organizations-mods)) |
+| Managed `prependPlugins` without `sec-default@builtin` | the guard does not load, so user hooks run on `session.compact` | drops every hold the guard keeps for the organization |
+
+`prependPlugins` in user settings counts only on a machine with no managed settings and a
+credential that is not a Team or Enterprise `/login`, where the guard does not load anyway.
+Otherwise use the CLI (`lcc compact transcript.json --mode tool-calls`) or the MCP server,
+which no plugin chain touches.
 
 ## Early-access caveat
 

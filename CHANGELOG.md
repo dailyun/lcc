@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **Receipt after every tool-call compaction pass.** `lcc compact --mode tool-calls` prints one
+  line last: tokens before and after, what was removed, and how to recall it; `--receipt`
+  prints the five largest stashed outputs with their `recall` ids and the cache effect. The
+  MCP `compact_transcript` answer carries the line as `receipt`, and the Claude Code hook
+  toasts it.
+- **Opt-in local ledger and statusline** (Claude Code plugin). `ledger: true` (or
+  `LCC_LEDGER=1`) appends one line of counts per applied compaction to
+  `~/.cache/lcc/ledger.jsonl` (`LCC_LEDGER_PATH`): no text, no paths, a hashed session id,
+  never sent anywhere. Off by default. `plugins/claude-code/scripts/statusline.mjs` shows the
+  session's removed tokens, stashed outputs and cache-read share. See
+  `docs/CLAUDE_CODE.md#receipt-ledger-and-statusline`.
+
 ### Security
 
 - Request-log redaction avoids repeated scans of long secret names, email addresses,
@@ -52,6 +66,14 @@ All notable changes to this project are documented here. The format is based on
   user, and `.dockerignore` excludes `.env` files and keys.
 
 ### Added
+
+- **Continuous invariant harness** (plan items B1 + B2). `tests/invariants.py` holds seven
+  invariants of the `rules` modes (idempotence, verbatim, recall round-trip, no corruption,
+  stable placeholders, accounting, fail-closed). They run over hypothesis-generated transcripts
+  for `LCC_FUZZ_SECONDS` (60 s in PR CI, 600 s in a nightly workflow that uploads seeds and
+  shrunk failing inputs and gates nothing), over a versioned `tests/corpus/adversarial/` on
+  every run, and across `PYTHONHASHSEED` values. `hypothesis` is a new dev-only dependency. A
+  planted bug (stash pointer ids from `hash()`) fails the PR-budget run in about 30 s.
 
 - **`lcc measure-session --input-map`: where a session's input tokens go.** Reads the
   provider's own usage records in a Claude Code session or Codex rollout and reports billed
@@ -180,6 +202,8 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- Keep plain integer `max_tokens` and `tokens` counts in request logs (#72), redacting
+  bounded input and dropping partial boundary words so a secret cannot be mistaken for a count.
 - **`measure-session --input-map` and compactions.** Claude Code: the messages a compaction
   keeps (`compactMetadata.preservedMessages` / `preservedSegment`) stay in the replayed context
   instead of vanishing at the boundary. Codex: the compaction call, billed only through
@@ -189,6 +213,14 @@ All notable changes to this project are documented here. The format is based on
   `unattributed (opaque summary)`, sized from the next request's billed input, with a warning.
   The report also warns when Claude Code's fixed overhead cannot be separated, instead of
   silently spreading it over the other categories. `session_report.codex_message` is public.
+- **Found by the invariant harness** (each is a corpus case): lossless no longer re-dedupes an
+  earlier pass's pointers (its own or stash/recoverable ones) into pointers to pointers; a
+  decision turned back into `keep` (pinned result, verification fail-safe) no longer carries
+  `note`, `kept_at` or `stash`; a whitespace-only user message is kept instead of being dropped
+  on rebuild, which had tripped the fail-safe and stopped the whole pass; and an output too
+  short to stash stays available to lossless dedupe, so `stashed` is a fixed point. A stashed
+  result that is too short now reports `not_stash_eligible` instead of
+  `short_result_kept_whole`.
   Claude Code `<synthetic>` messages (local API errors, zero usage) are not requests; a split
   response without `requestId` is keyed by `message.id`; `preservedSegment` is followed as a
   `parentUuid` chain, so a rewound branch between head and tail is not counted; and tool
