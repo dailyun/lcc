@@ -199,6 +199,8 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- Keep plain integer `max_tokens` and `tokens` counts in request logs (#72), redacting
+  bounded input and dropping partial boundary words so a secret cannot be mistaken for a count.
 - **`measure-session --input-map` and compactions.** Claude Code: the messages a compaction
   keeps (`compactMetadata.preservedMessages` / `preservedSegment`) stay in the replayed context
   instead of vanishing at the boundary. Codex: the compaction call, billed only through
