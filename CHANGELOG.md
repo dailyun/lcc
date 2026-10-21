@@ -62,8 +62,10 @@ All notable changes to this project are documented here. The format is based on
   outputs are charged from the next request on, and a compaction rebuilds the context from its
   `replacement_history`. For Claude Code the fixed overhead is the intercept of a fit of
   billed input on transcript size. Shares assume one tokenizer ratio across categories, so
-  they rank categories rather than give exact percentages, and the output says so. Counts only, offline, JSON or Markdown. On a
-  945-request Claude Code session it runs in under a second.
+  they rank categories rather than give exact percentages, and the output says so. Counts
+  only, offline, JSON or Markdown: tool names and attachment types appear, MCP tool names
+  (which carry server names) are grouped as `mcp`. On a 945-request Claude Code session it
+  runs in under a second.
 
 - `lcc measure-session --question/-q` passes a specific question or objective to every
   compaction mode, retaining the previous default when omitted (#61).
@@ -173,6 +175,15 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- **`measure-session --input-map` and compactions.** Claude Code: the messages a compaction
+  keeps (`compactMetadata.preservedMessages` / `preservedSegment`) stay in the replayed context
+  instead of vanishing at the boundary. Codex: the compaction call, billed only through
+  `token_usage_record` / `latest_token_usage_record`, is now counted (once per response id; on
+  one local rollout with two compactions that added 653,505 billed tokens, matching the usage
+  records exactly), and an encrypted compaction summary is shown as
+  `unattributed (opaque summary)`, sized from the next request's billed input, with a warning.
+  The report also warns when Claude Code's fixed overhead cannot be separated, instead of
+  silently spreading it over the other categories. `session_report.codex_message` is public.
 - Preserve CRLF separators when joining trimmed log lines (#71); `TRIM_POLICY_VERSION` is now `trim-1.3`, changing prompt-cache identity. Historical `trim-1.2` benchmark results are unchanged.
 - **`lcc explain` left out `replace` and `dedupe` decisions.** On a `provider: rules` report
   the outputs that were stashed, re-read pointers or deduped were not listed at all, so the

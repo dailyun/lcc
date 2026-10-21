@@ -14,13 +14,16 @@ Reads a Claude Code session or Codex rollout (JSONL) locally and reports, **coun
 
 The shares assume one tokenizer ratio across categories (the provider's tokenizer differs
 from lcc's), so they rank categories; they are not exact percentages. The report says so.
-No session text, file path or tool output is in the report. Nothing is sent anywhere.
+No session text, file path or tool output is in the report; built-in tool names and attachment
+types are, and MCP tool names (which carry server names) are grouped as `mcp`. Nothing is sent
+anywhere.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections import Counter
 from collections.abc import Iterable, Iterator
 from pathlib import Path
@@ -33,7 +36,9 @@ COST_FACTORS = {"uncached": 1.0, "cache_write": 1.25, "cache_read": 0.1}
 APPROXIMATION = (
     "Billed input and its cache split come from the provider's usage records (exact). "
     "Category shares replay the transcript with lcc's tokenizer and assume one tokenizer "
-    "ratio across categories: use them to rank categories, not as exact percentages."
+    "ratio across categories: use them to rank categories, not as exact percentages. For "
+    "Claude Code the fixed overhead is one fit over the whole session, so overhead that changes "
+    "between compactions (newly loaded tools, re-injected listings) is averaged."
 )
 #: Fewer requests than this and the overhead fit is not attempted.
 MIN_FIT_REQUESTS = 10
@@ -42,6 +47,7 @@ DUPLICATE_MIN_TOKENS = 50
 TOP_N = 8
 
 FIXED = "fixed overhead (system prompt, tool schemas, instructions)"
+OPAQUE = "unattributed (opaque summary)"
 # Attachment types Claude Code records but does not render into the model's context.
 _NOT_SENT = frozenset({
     "auto_mode", "auto_mode_exit", "command_permissions", "compact_file_reference",
@@ -58,6 +64,27 @@ def _tokens(text: str) -> int:
     from lcc.token_budget import count_tokens
 
     return count_tokens(text, "gpt-4.1").value if text else 0
+
+
+def _int(value: Any) -> int:
+    """A usage count as written by the provider; anything malformed counts as 0."""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return max(0, value)
+    if isinstance(value, float):  # json.loads accepts Infinity and NaN
+        return max(0, int(value)) if math.isfinite(value) else 0
+    if isinstance(value, str):
+        try:
+            return max(0, int(value.strip()))
+        except ValueError:
+            return 0
+    return 0
+
+
+def _tool_name(name: str) -> str:
+    """MCP tool names carry server (often project) names: group them."""
+    return "mcp" if "mcp__" in name else name
 
 
 def _token_method() -> tuple[str, str | None]:
@@ -102,44 +129,70 @@ def _attachment_text(attachment: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-# Events: ("item" | "generated", category, detail, tokens, digest, path) | ("request", usage)
-# | ("boundary",) | ("context", category, tokens) | ("system_prompt", tokens). "generated" items
-# came from the response being billed next; "context" items are re-sent copies. `detail` is the
-# tool or attachment type for the drill-down.
+# Events: ("item" | "generated", category, detail, tokens, digest, path)
+# | ("request", usage[, whole_context]) | ("boundary",) | ("context", category, tokens)
+# | ("system_prompt", tokens) | ("opaque",). "generated" items came from the response being
+# billed next; "context" items are re-sent copies; "opaque" marks an encrypted summary.
+# `detail` is the tool or attachment type for the drill-down.
 Event = tuple[Any, ...]
 
 
-def _claude_events(records: Iterable[dict[str, Any]]) -> Iterator[Event]:
+def _request_key(record: dict[str, Any], index: int) -> str:
+    # One request can be written over several lines sharing a requestId; a record without
+    # one is its own request.
+    return str(record.get("requestId") or record.get("uuid") or f"#{index}")
+
+
+def _preserved_uuids(boundary: dict[str, Any], order: list[str]) -> list[str]:
+    """UUIDs of the messages a Claude Code compaction kept (``compactMetadata``)."""
+    meta = boundary.get("compactMetadata")
+    if not isinstance(meta, dict):
+        return []
+    kept = meta.get("preservedMessages")
+    if isinstance(kept, dict):
+        uuids = kept.get("allUuids") or kept.get("uuids")
+        if isinstance(uuids, list):
+            return [u for u in uuids if isinstance(u, str)]
+    segment = meta.get("preservedSegment")
+    if isinstance(segment, dict) and segment.get("headUuid") in order:
+        head = order.index(segment["headUuid"])
+        tail = order.index(segment["tailUuid"]) if segment.get("tailUuid") in order else head
+        return order[head:tail + 1]
+    return []
+
+
+def _claude_events(records: list[dict[str, Any]]) -> Iterator[Event]:
     calls: dict[str, tuple[str, str]] = {}
     seen_requests: set[str] = set()
-    for record in records:
+    final_usage: dict[str, dict[str, Any]] = {}  # a split request's last usage is complete
+    for index, record in enumerate(records):
+        usage = (record.get("message") or {}).get("usage") if isinstance(
+            record.get("message"), dict) else None
+        if record.get("type") == "assistant" and isinstance(usage, dict):
+            final_usage[_request_key(record, index)] = usage
+
+    def record_events(record: dict[str, Any], index: int) -> Iterator[Event]:
         kind = record.get("type")
-        if record.get("isSidechain"):
-            continue  # a subagent's own context, not this one's
-        if kind == "system" and record.get("subtype") == "compact_boundary":
-            yield ("boundary",)
-            continue
         if kind == "attachment":
             attachment = record.get("attachment")
             if not isinstance(attachment, dict):
-                continue
+                return
             if attachment.get("type") == "prompt_snapshot":
                 yield ("system_prompt", _tokens(_dumps(attachment.get("systemPrompt") or "")))
-                continue
+                return
             text = _attachment_text(attachment)
             if text:
                 yield ("item", "attachments", str(attachment.get("type")), _tokens(text), None, "")
-            continue
+            return
         message = record.get("message")
         if not isinstance(message, dict):
-            continue
+            return
         content = message.get("content")
         if kind == "assistant":
-            request_id = record.get("requestId")
-            usage = message.get("usage")
-            if isinstance(usage, dict) and request_id and request_id not in seen_requests:
-                seen_requests.add(request_id)
-                yield ("request", usage)
+            key = _request_key(record, index)
+            if key in final_usage and key not in seen_requests:
+                seen_requests.add(key)
+                yield ("request", final_usage[key])
             for block in content if isinstance(content, list) else []:
                 if not isinstance(block, dict):
                     continue
@@ -149,7 +202,7 @@ def _claude_events(records: Iterable[dict[str, Any]]) -> Iterator[Event]:
                 elif block.get("type") == "tool_use":
                     tool_input = block.get("input")
                     tool_input = tool_input if isinstance(tool_input, dict) else {}
-                    name = str(block.get("name") or "?")
+                    name = _tool_name(str(block.get("name") or "?"))
                     path = tool_input.get("file_path") if name == "Read" else None
                     calls[str(block.get("id"))] = (name, path if isinstance(path, str) else "")
                     yield ("item", "tool-call inputs", name, _tokens(_dumps(tool_input)), None, "")
@@ -159,7 +212,7 @@ def _claude_events(records: Iterable[dict[str, Any]]) -> Iterator[Event]:
             if isinstance(content, str):
                 category = "compaction summary" if summary else "user text"
                 yield ("item", category, "", _tokens(content), None, "")
-                continue
+                return
             for block in content if isinstance(content, list) else []:
                 if not isinstance(block, dict):
                     continue
@@ -176,6 +229,22 @@ def _claude_events(records: Iterable[dict[str, Any]]) -> Iterator[Event]:
                     category = "compaction summary" if summary else "user text"
                     yield ("item", category, "", _tokens(text), None, "")
 
+    kept: dict[str, list[tuple[str, int]]] = {}  # uuid -> (category, tokens) it put in context
+    for index, record in enumerate(records):
+        if record.get("isSidechain"):
+            continue  # a subagent's own context, not this one's
+        if record.get("type") == "system" and record.get("subtype") == "compact_boundary":
+            yield ("boundary",)
+            # Claude Code keeps some messages through a compaction without writing them again
+            for uuid in _preserved_uuids(record, list(kept)):
+                for category, tokens in kept.get(uuid, []):
+                    yield ("context", category, tokens)
+            continue
+        events = list(record_events(record, index))
+        if isinstance(record.get("uuid"), str):
+            kept[record["uuid"]] = [(e[1], e[3]) for e in events if e[0] == "item"]
+        yield from events
+
 
 def _codex_events(records: Iterable[dict[str, Any]]) -> Iterator[Event]:
     """Codex rollout events.
@@ -184,11 +253,14 @@ def _codex_events(records: Iterable[dict[str, Any]]) -> Iterator[Event]:
     made are written *before* its ``token_count``, so they are yielded as ``generated``: the
     replay charges them from the next request on, not to the request that produced them.
     """
-    from lcc.session_report import _codex_message
+    from lcc.session_report import codex_message
 
     calls: dict[str, str] = {}
     fresh_calls: set[str] = set()  # calls made since the last billed request
     last_total: Any = None
+    # token_usage_record duplicates token_count, except for the compaction call itself
+    last_record: dict[str, Any] | None = None
+    counted: set[str] = set()  # response ids already billed through token_count
     base = ""  # base_instructions: sent as `instructions` on every request
 
     def item(payload: dict[str, Any], index: int, generated: bool) -> Iterator[Event]:
@@ -214,10 +286,11 @@ def _codex_events(records: Iterable[dict[str, Any]]) -> Iterator[Event]:
             yield ("generated" if generated else "item", category, "", _tokens(text), None, "")
         elif item_type in ("function_call", "custom_tool_call", "local_shell_call",
                            "web_search_call"):
-            entry = _codex_message(payload, index)
+            entry = codex_message(payload, index)
             if entry is None:
                 return
             use = entry["toolUses"][0]
+            use["tool"] = _tool_name(use["tool"])
             calls[use["tool_use_id"]] = use["tool"]
             if generated:
                 fresh_calls.add(use["tool_use_id"])
@@ -245,6 +318,13 @@ def _codex_events(records: Iterable[dict[str, Any]]) -> Iterator[Event]:
                 yield ("item", "system prompt", "", _tokens(base), None, "")
         elif kind == "compacted":
             # The context after compaction is what replaced it, plus the instructions.
+            latest = payload.get("latest_token_usage_record")
+            billing = latest if isinstance(latest, dict) else last_record
+            response = str((billing or {}).get("response_id") or "")
+            if billing and isinstance(billing.get("usage"), dict) and response not in counted:
+                counted.add(response)
+                # the compaction call was sent the whole context before it
+                yield ("request", _codex_usage(billing["usage"]), True)
             yield ("boundary",)
             fresh_calls.clear()
             if base:
@@ -253,12 +333,16 @@ def _codex_events(records: Iterable[dict[str, Any]]) -> Iterator[Event]:
             if isinstance(history, list):
                 for entry in history:
                     if isinstance(entry, dict):
+                        if entry.get("type") == "compaction" or "encrypted_content" in entry:
+                            yield ("opaque",)  # an encrypted summary: size unknown here
                         for event in item(entry, index, generated=False):
                             yield ("context", event[1], event[3])
             elif isinstance(payload.get("message"), str):
                 yield ("context", "compaction summary", _tokens(payload["message"]))
         elif kind == "response_item":
             yield from item(payload, index, generated=True)
+        elif kind == "token_usage_record":
+            last_record = payload
         elif kind == "event_msg" and payload.get("type") == "token_count":
             info = payload.get("info")
             if not isinstance(info, dict):
@@ -269,18 +353,23 @@ def _codex_events(records: Iterable[dict[str, Any]]) -> Iterator[Event]:
                 continue  # Codex repeats a count when nothing new was billed
             last_total = total
             fresh_calls.clear()
-            cached = int(last.get("cached_input_tokens") or 0)
-            written = int(last.get("cache_write_input_tokens") or 0)
-            yield ("request", {
-                # input_tokens includes the cached and written parts
-                "input_tokens": max(0, int(last.get("input_tokens") or 0) - cached - written),
-                "cache_read_input_tokens": cached,
-                "cache_creation_input_tokens": written,
-                "output_tokens": int(last.get("output_tokens") or 0),
-                "output_tokens_details": {
-                    "thinking_tokens": int(last.get("reasoning_output_tokens") or 0)
-                },
-            })
+            if last_record is not None:
+                counted.add(str(last_record.get("response_id") or ""))
+                last_record = None
+            yield ("request", _codex_usage(last))
+
+
+def _codex_usage(last: dict[str, Any]) -> dict[str, Any]:
+    cached = _int(last.get("cached_input_tokens"))
+    written = _int(last.get("cache_write_input_tokens"))
+    return {
+        # input_tokens includes the cached and written parts
+        "input_tokens": max(0, _int(last.get("input_tokens")) - cached - written),
+        "cache_read_input_tokens": cached,
+        "cache_creation_input_tokens": written,
+        "output_tokens": _int(last.get("output_tokens")),
+        "output_tokens_details": {"thinking_tokens": _int(last.get("reasoning_output_tokens"))},
+    }
 
 
 def _records(path: Path) -> list[dict[str, Any]]:
@@ -342,14 +431,20 @@ def input_map(path: Path) -> dict[str, Any]:
     seen_outputs: set[str] = set()
     reread = reread_identical = duplicates = 0
     system_prompt = 0
+    opaque_pending = False
+    opaque_segments = 0
     for event in events:
-        if event[0] == "boundary":
+        if event[0] == "boundary":  # what came before is no longer in context
             active.clear()
             pending.clear()
+            reads.clear()
+            seen_outputs.clear()
         elif event[0] == "system_prompt":
             system_prompt = max(system_prompt, event[1])
         elif event[0] == "context":  # re-sent after a compaction; already counted once
             active[event[1]] += event[2]
+        elif event[0] == "opaque":
+            opaque_pending = True
         elif event[0] in ("item", "generated"):
             _, category, detail, tokens, digest, file_path = event
             once[category] += tokens
@@ -371,17 +466,28 @@ def input_map(path: Path) -> dict[str, Any]:
         else:  # request
             usage = event[1]
             row = {
-                "uncached": int(usage.get("input_tokens") or 0),
-                "cache_write": int(usage.get("cache_creation_input_tokens") or 0),
-                "cache_read": int(usage.get("cache_read_input_tokens") or 0),
+                "uncached": _int(usage.get("input_tokens")),
+                "cache_write": _int(usage.get("cache_creation_input_tokens")),
+                "cache_read": _int(usage.get("cache_read_input_tokens")),
             }
             billed.update(row)
             details = usage.get("output_tokens_details")
-            output["output"] += int(usage.get("output_tokens") or 0)
+            output["output"] += _int(usage.get("output_tokens"))
             if isinstance(details, dict):
-                output["thinking"] += int(details.get("thinking_tokens") or 0)
-            sent = active - pending  # what this request was sent: not its own output
-            pending.clear()
+                output["thinking"] += _int(details.get("thinking_tokens"))
+            if len(event) > 2 and event[2]:
+                sent = +active  # a compaction call: sent the whole context
+            else:
+                sent = active - pending  # what this request was sent: not its own output
+                pending.clear()
+            if opaque_pending and not (len(event) > 2 and event[2]):
+                # An encrypted compaction summary has no text to count. Size it from the
+                # first request after it: billed input minus what the replay can see.
+                gap = max(0, sum(row.values()) - sum(sent.values()))
+                active[OPAQUE] += gap
+                sent[OPAQUE] += gap
+                opaque_pending = False
+                opaque_segments += 1
             replayed.update(sent)
             pairs.append((sum(sent.values()), sum(row.values())))
 
@@ -398,6 +504,19 @@ def input_map(path: Path) -> dict[str, Any]:
             if tokens and replay_total:
                 share = (1 - fixed_share) * tokens / replay_total
                 shares.append({"category": category, "share": round(share, 4)})
+    warnings = []
+    if not codex and total and fit is None:
+        warnings.append(
+            "Fixed overhead (system prompt, tool schemas, instructions) could not be separated "
+            "in this session (fewer than 10 requests, or the fit gave a negative intercept). "
+            "It is spread over the categories below, which are overstated."
+        )
+    if opaque_segments:
+        warnings.append(
+            f"{opaque_segments} compaction(s) left an encrypted summary. Its size is estimated "
+            f"as the first later request's billed input minus what lcc can count, and shown "
+            f"as '{OPAQUE}'."
+        )
     weighted = {k: round(billed[k] * f, 1) for k, f in COST_FACTORS.items()}
     weighted_total = sum(weighted.values())
     method, note = _token_method()
@@ -437,6 +556,7 @@ def input_map(path: Path) -> dict[str, Any]:
         "token_count_method": method,
         "token_count_note": note,
         "approximation": APPROXIMATION,
+        "warnings": warnings,
     }
 
 
@@ -458,6 +578,9 @@ def to_markdown(report: dict[str, Any]) -> str:
         f"write {factors['cache_write']}×)",
         "",
     ]
+    lines += [f"> Warning: {w}" for w in report.get("warnings", [])]
+    if report.get("warnings"):
+        lines.append("")
     if report["categories"]:
         lines += ["| where billed input goes | share |", "| --- | ---: |"]
         lines += [f"| {r['category']} | {r['share']:.1%} |" for r in report["categories"]]
@@ -486,5 +609,6 @@ def to_markdown(report: dict[str, Any]) -> str:
     ]
     if report.get("token_count_note"):
         lines.append(f"> Approximate counts: {report['token_count_note']}")
-    lines += ["", "Counts only: no session text, file path or tool output is included."]
+    lines += ["", "Counts only: no session text, file path or tool output is included. Built-in "
+              "tool names and attachment types are; MCP tools are grouped as `mcp`."]
     return "\n".join(lines)
