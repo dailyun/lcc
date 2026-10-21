@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format is based on
 
 ### Security
 
+- Existing Jev ledger files are tightened to `0600` before appending (#70).
 - **HTTP server: tool errors no longer echo exception text** (#73). A failing tool call over
   `lcc mcp --http` shows only the handlers' own validation messages (missing `text`, a bad
   `provider`, `'threshold' must be a number`); any other error answers

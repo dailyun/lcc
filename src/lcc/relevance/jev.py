@@ -270,6 +270,8 @@ class JevClient:
             # Owner-only (0600) like the request log: entries carry API error bodies.
             fd = os.open(self.ledger_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             with os.fdopen(fd, "a", encoding="utf-8") as handle:
+                if hasattr(os, "fchmod"):
+                    os.fchmod(handle.fileno(), 0o600)
                 handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     # -- transport ------------------------------------------------------------
