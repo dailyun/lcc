@@ -157,6 +157,8 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- Keep plain integer `max_tokens` and `tokens` counts in request logs (#72), redacting
+  before truncation so a partial secret cannot be mistaken for a count.
 - Preserve CRLF separators when joining trimmed log lines (#71); `TRIM_POLICY_VERSION` is now `trim-1.3`, changing prompt-cache identity. Historical `trim-1.2` benchmark results are unchanged.
 - **`lcc explain` left out `replace` and `dedupe` decisions.** On a `provider: rules` report
   the outputs that were stashed, re-read pointers or deduped were not listed at all, so the

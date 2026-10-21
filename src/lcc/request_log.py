@@ -264,7 +264,7 @@ def log_request(
     if not enabled() or not isinstance(goal, str) or not goal.strip():
         return None
     try:
-        redacted = redact(goal.strip()[:MAX_GOAL_CHARS])
+        redacted = redact(goal.strip())[:MAX_GOAL_CHARS]
         if not (isinstance(language, str) and re.fullmatch(r"[a-z]{2}", language)):
             language = detect_language(redacted)
         directory = log_dir()
@@ -278,7 +278,7 @@ def log_request(
             "session": session_hash(key, _salt(directory)),
             "tool": tool,
             "field": (
-                redact(field.strip()[:MAX_GOAL_CHARS])
+                redact(field.strip())[:MAX_GOAL_CHARS]
                 if isinstance(field, str) and field.strip()
                 else "none"
             ),
